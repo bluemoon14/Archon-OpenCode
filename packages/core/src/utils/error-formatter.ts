@@ -37,16 +37,6 @@ export function classifyAndFormatError(error: Error): string {
     return '⚠️ Claude authentication error. Run `/login` inside Claude Code or check your API key configuration.';
   }
 
-  // Codex-specific auth errors — 401 retry exhaustion
-  // Codex surfaces auth failures as "exceeded retry limit, last status: 401 Unauthorized"
-  // Recovery: `codex login` in terminal.
-  if (
-    message.includes('Codex query failed:') &&
-    (message.includes('401') || message.includes('Unauthorized'))
-  ) {
-    return '⚠️ Codex authentication error. Run `codex login` in your terminal to re-authenticate.';
-  }
-
   // General AI/SDK authentication errors
   if (
     message.includes('API key') ||
@@ -74,12 +64,6 @@ export function classifyAndFormatError(error: Error): string {
 
   if (message.startsWith('❌ Model "') && message.includes('not available for your account')) {
     return message;
-  }
-
-  // Codex-specific errors (thrown as "Codex query failed: ...")
-  if (message.includes('Codex query failed:')) {
-    const innerMessage = message.replace('Codex query failed: ', '');
-    return `⚠️ AI error: ${innerMessage}. Try /reset if issue persists.`;
   }
 
   // Generic fallback with hint about what failed

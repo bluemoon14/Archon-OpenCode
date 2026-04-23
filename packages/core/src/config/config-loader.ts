@@ -41,7 +41,6 @@ import {
   isRegisteredProvider,
   getRegisteredProviders,
   registerBuiltinProviders,
-  registerCommunityProviders,
 } from '@archon/providers';
 
 /**
@@ -95,10 +94,6 @@ function mergeAssistantDefaults(
  */
 const SAFE_ASSISTANT_FIELDS: Record<string, readonly string[]> = {
   claude: ['model'],
-  codex: ['model', 'modelReasoningEffort', 'webSearchMode'],
-  // community providers — list each field we're confident is safe to
-  // show in the web UI. Unknown providers fall through with no fields.
-  pi: ['model'],
 };
 
 function toSafeAssistantDefaults(assistants: AssistantDefaults): SafeConfig['assistants'] {
@@ -148,19 +143,13 @@ const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
 # Bot display name (shown in messages)
 # botName: Archon
 
-# Default AI assistant (must match a registered provider, e.g. claude, codex)
+# Default AI assistant (currently only 'claude' is supported)
 # defaultAssistant: claude
 
 # Assistant defaults
 # assistants:
 #   claude:
 #     model: sonnet
-#   codex:
-#     model: gpt-5.3-codex
-#     modelReasoningEffort: medium
-#     webSearchMode: disabled
-#     additionalDirectories:
-#       - /absolute/path/to/other/repo
 
 # Concurrency settings
 # concurrency:
@@ -255,14 +244,10 @@ export async function loadRepoConfig(repoPath: string): Promise<RepoConfig> {
  * Get default configuration
  */
 function getDefaults(): MergedConfig {
-  // Seed one empty entry per registered provider — built-in OR community.
-  // No per-provider listing here: adding a new provider must not require
-  // editing this function. `registerBuiltinProviders()` + any community
-  // registrations run at process bootstrap (see `packages/providers/src/
-  // registry.ts#registerCommunityProviders`), so by the time this runs the
-  // registry is populated.
+  // Seed one empty entry per registered provider. No per-provider listing here:
+  // adding a new provider must not require editing this function.
   const providers = getRegisteredProviders();
-  const registeredAssistants: AssistantDefaults = { claude: {}, codex: {} };
+  const registeredAssistants: AssistantDefaults = { claude: {} };
   for (const provider of providers) {
     if (!(provider.id in registeredAssistants)) {
       registeredAssistants[provider.id] = {};
@@ -446,7 +431,6 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
  */
 export async function loadConfig(repoPath?: string): Promise<MergedConfig> {
   registerBuiltinProviders();
-  registerCommunityProviders();
 
   // 1. Start with defaults
   let config = getDefaults();

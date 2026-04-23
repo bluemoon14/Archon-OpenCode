@@ -41,7 +41,7 @@ import { createWorkflowDeps } from '../workflows/store-adapter';
 import { loadConfig } from '../config/config-loader';
 import type { MergedConfig } from '../config/config-types';
 import { generateAndSetTitle } from '../services/title-generator';
-import { validateAndResolveIsolation, dispatchBackgroundWorkflow } from './orchestrator';
+import { validateAndResolveIsolation } from './orchestrator';
 import { IsolationBlockedError } from '@archon/isolation';
 import {
   buildOrchestratorPrompt,
@@ -210,9 +210,6 @@ function filterToolIndicators(assistantMessages: string[]): string {
 /**
  * Dispatch a workflow after the orchestrator resolves a project.
  * Auto-attaches the project to the conversation, resolves isolation, and executes.
- *
- * TODO(#988): Move to operations/ once dispatchBackgroundWorkflow is extracted
- * from the orchestrator (currently coupled to SSE bridging infrastructure).
  */
 async function dispatchOrchestratorWorkflow(
   platform: IPlatformAdapter,
@@ -267,82 +264,35 @@ async function dispatchOrchestratorWorkflow(
     }
   }
 
-  // Dispatch workflow
-  if (platform.getPlatformType() === 'web') {
-    // Check for a resumable run from a prior dispatch (e.g. approved approval gate).
-    // A new background dispatch would create a new worker conversation and never find
-    // the prior run's worktree. Execute in foreground to reuse the original working path.
-    const resumableRun = await workflowDb.findResumableRunByParentConversation(
-      workflow.name,
-      conversation.id
-    );
-    if (resumableRun?.working_path) {
-      getLog().info(
-        {
-          workflowName: workflow.name,
-          resumableRunId: resumableRun.id,
-          workingPath: resumableRun.working_path,
-        },
-        'orchestrator.foreground_resume_detected'
-      );
-      await executeWorkflow(
-        createWorkflowDeps(),
-        platform,
-        conversationId,
-        resumableRun.working_path,
-        workflow,
-        userMessage,
-        conversation.id,
-        codebase.id,
-        undefined, // issueContext
-        undefined, // isolationContext
-        conversation.id // parentConversationId — enables approve/reject auto-resume
-      );
-    } else if (workflow.interactive) {
-      // Interactive workflows run in foreground so output stays in the user's conversation
-      await executeWorkflow(
-        createWorkflowDeps(),
-        platform,
-        conversationId,
-        cwd,
-        workflow,
-        userMessage,
-        conversation.id,
-        codebase.id,
-        undefined, // issueContext
-        undefined, // isolationContext
-        conversation.id // parentConversationId — enables approve/reject auto-resume
-      );
-    } else {
-      await dispatchBackgroundWorkflow(
-        {
-          platform,
-          conversationId,
-          cwd,
-          originalMessage: userMessage,
-          conversationDbId: conversation.id,
-          codebaseId: codebase.id,
-          availableWorkflows: [workflow],
-          isolationHints,
-        },
-        workflow
-      );
-    }
-  } else {
-    await executeWorkflow(
-      createWorkflowDeps(),
-      platform,
-      conversationId,
-      cwd,
-      workflow,
-      userMessage,
-      conversation.id,
-      codebase.id,
-      undefined, // issueContext
-      undefined, // isolationContext
-      conversation.id // parentConversationId — enables approve/reject auto-resume
+  // Check for a resumable run from a prior dispatch (e.g. approved approval gate)
+  // so the workflow resumes in its original worktree rather than a fresh cwd.
+  const resumableRun = await workflowDb.findResumableRunByParentConversation(
+    workflow.name,
+    conversation.id
+  );
+  if (resumableRun?.working_path) {
+    getLog().info(
+      {
+        workflowName: workflow.name,
+        resumableRunId: resumableRun.id,
+        workingPath: resumableRun.working_path,
+      },
+      'orchestrator.foreground_resume_detected'
     );
   }
+  await executeWorkflow(
+    createWorkflowDeps(),
+    platform,
+    conversationId,
+    resumableRun?.working_path ?? cwd,
+    workflow,
+    userMessage,
+    conversation.id,
+    codebase.id,
+    undefined, // issueContext
+    undefined, // isolationContext
+    conversation.id // parentConversationId — enables approve/reject auto-resume
+  );
 }
 
 // ─── Session Helpers ────────────────────────────────────────────────────────

@@ -13,50 +13,28 @@
 
 // Provider config defaults — canonical definitions live in @archon/providers/types.
 // Imported and re-exported here so existing consumers don't break.
-import type {
-  ClaudeProviderDefaults,
-  CodexProviderDefaults,
-  PiProviderDefaults,
-  ProviderDefaultsMap,
-} from '@archon/providers/types';
+import type { ClaudeProviderDefaults, ProviderDefaultsMap } from '@archon/providers/types';
 
-export type {
-  ClaudeProviderDefaults,
-  CodexProviderDefaults,
-  PiProviderDefaults,
-  ProviderDefaultsMap,
-};
+export type { ClaudeProviderDefaults, ProviderDefaultsMap };
 
 /**
  * Intersection type: generic `ProviderDefaultsMap` (any string key) with
- * typed built-in entries.
- *
- * The built-in entries exist ONLY to give call sites like
- * `config.assistants.claude.model` IDE autocomplete without `as` casts.
- * They do NOT provide parser safety (each provider's `parseXxxConfig`
- * already takes `Record<string, unknown>` and defends itself).
- *
- * Community providers should NOT be added here — they live behind the
- * generic `[string]` index. Adding a new community provider must not
- * require a core-package type change; that's the whole point of Phase 2.
+ * typed built-in entries. Currently only Claude is built in; future
+ * providers (OpenCode, Pydantic AI, etc.) will be added here.
  */
 export type AssistantDefaultsConfig = ProviderDefaultsMap & {
   claude?: ClaudeProviderDefaults;
-  codex?: CodexProviderDefaults;
 };
 
 /**
  * Required variant — built-ins are always present after `loadConfig`.
  *
- * `getDefaults()` seeds every registered provider (built-in + community)
- * with `{}`, so community providers appear in the map too — just typed as
- * `ProviderDefaults` via the generic index rather than a specific shape.
+ * `getDefaults()` seeds every registered provider with `{}`.
  * `registerBuiltinProviders()` is called before `loadConfig()` at every
- * process entrypoint, so claude/codex are guaranteed present.
+ * process entrypoint, so claude is guaranteed present.
  */
 export type AssistantDefaults = ProviderDefaultsMap & {
   claude: ClaudeProviderDefaults;
-  codex: CodexProviderDefaults;
 };
 
 export interface GlobalConfig {

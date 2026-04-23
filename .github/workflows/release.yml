@@ -236,17 +236,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build web UI
-        run: bun --filter @archon/web build
-
-      - name: Package web dist
-        run: |
-          tar czf dist/archon-web.tar.gz -C packages/web/dist .
-
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum archon-* archon-web.tar.gz > checksums.txt
+          sha256sum archon-* > checksums.txt
           cat checksums.txt
 
       - name: Get version
@@ -268,7 +261,6 @@ jobs:
           generate_release_notes: true
           files: |
             dist/archon-*
-            dist/archon-web.tar.gz
             dist/checksums.txt
           body: |
             ## Installation
@@ -290,9 +282,10 @@ jobs:
             brew install coleam00/archon/archon
             ```
 
-            **Docker**
+            **Podman**
             ```bash
-            docker run --rm -v "$PWD:/workspace" ghcr.io/coleam00/archon:latest workflow list
+            podman build -f Containerfile -t archon .
+            podman run --rm archon workflow list
             ```
 
             ### Manual Installation

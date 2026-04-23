@@ -69,22 +69,6 @@ describe('classifyAndFormatError', () => {
     });
   });
 
-  describe('Codex auth errors', () => {
-    test('detects Codex 401 retry exhaustion', () => {
-      const result = classifyAndFormatError(
-        new Error('Codex query failed: exceeded retry limit, last status: 401 Unauthorized')
-      );
-      expect(result).toContain('Codex authentication error');
-      expect(result).toContain('codex login');
-    });
-
-    test('detects Codex query failed with Unauthorized', () => {
-      const result = classifyAndFormatError(new Error('Codex query failed: Unauthorized'));
-      expect(result).toContain('Codex authentication error');
-      expect(result).toContain('codex login');
-    });
-  });
-
   describe('general authentication errors', () => {
     test('detects "API key" in message', () => {
       const result = classifyAndFormatError(new Error('Invalid API key provided'));
@@ -170,12 +154,6 @@ describe('classifyAndFormatError', () => {
       expect(result).toBe(msg);
     });
 
-    test('returns message as-is for different model names', () => {
-      const msg = '❌ Model "gpt-5.3-codex" not available for your account';
-      const result = classifyAndFormatError(new Error(msg));
-      expect(result).toBe(msg);
-    });
-
     test('does not match when prefix is wrong', () => {
       // Same suffix but different prefix → should NOT pass through
       const msg = 'Model "claude-sonnet" not available for your account';
@@ -189,29 +167,6 @@ describe('classifyAndFormatError', () => {
       const result = classifyAndFormatError(new Error(msg));
       // Falls through to generic short-message path
       expect(result).toBe(`⚠️ Error: ${msg}. Try /reset if issue persists.`);
-    });
-  });
-
-  describe('Codex errors', () => {
-    test('extracts inner message from "Codex query failed:" prefix', () => {
-      const result = classifyAndFormatError(
-        new Error('Codex query failed: context length exceeded')
-      );
-      expect(result).toBe('⚠️ AI error: context length exceeded. Try /reset if issue persists.');
-    });
-
-    test('handles empty inner message after Codex prefix', () => {
-      const result = classifyAndFormatError(new Error('Codex query failed: '));
-      expect(result).toBe('⚠️ AI error: . Try /reset if issue persists.');
-    });
-
-    test('handles Codex error with longer inner message', () => {
-      const result = classifyAndFormatError(
-        new Error('Codex query failed: model overloaded, please retry')
-      );
-      expect(result).toBe(
-        '⚠️ AI error: model overloaded, please retry. Try /reset if issue persists.'
-      );
     });
   });
 
@@ -312,22 +267,9 @@ describe('classifyAndFormatError', () => {
       expect(result).toContain('Claude authentication expired');
     });
 
-    test('Codex auth takes precedence over generic Codex error handler', () => {
-      // Contains "Codex query failed:" AND "401" — Codex auth branch fires first
-      const result = classifyAndFormatError(new Error('Codex query failed: 401 Unauthorized'));
-      expect(result).toContain('Codex authentication error');
-      expect(result).toContain('codex login');
-    });
-
     test('auth check takes precedence over short-message fallback', () => {
       const result = classifyAndFormatError(new Error('API key'));
       expect(result).toContain('authentication error');
-    });
-
-    test('Codex check is applied before generic fallback', () => {
-      // Inner message has "token" — but Codex branch fires before security filter
-      const result = classifyAndFormatError(new Error('Codex query failed: token limit reached'));
-      expect(result).toBe('⚠️ AI error: token limit reached. Try /reset if issue persists.');
     });
   });
 });

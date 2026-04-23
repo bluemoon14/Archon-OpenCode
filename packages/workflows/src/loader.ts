@@ -11,7 +11,6 @@ import {
   SCRIPT_NODE_AI_FIELDS,
   LOOP_NODE_AI_FIELDS,
 } from './schemas/dag-node';
-import { modelReasoningEffortSchema, webSearchModeSchema } from './schemas/workflow';
 import { workflowNodeHooksSchema } from './schemas/hooks';
 import { z } from '@hono/zod-openapi';
 
@@ -272,8 +271,6 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     }
 
     // Parse workflow-level fields using WorkflowBaseSchema for validation
-    // Note: modelReasoningEffort and webSearchMode use warn-and-ignore for invalid values
-    // (consistent with original behavior) rather than schema-level rejection.
     const provider =
       typeof raw.provider === 'string' && raw.provider.length > 0 ? raw.provider : undefined;
     const model = typeof raw.model === 'string' ? raw.model : undefined;
@@ -288,30 +285,6 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
           errorType: 'validation_error',
         },
       };
-    }
-
-    // Validate modelReasoningEffort — warn and ignore invalid values (preserve original behavior)
-    const modelReasoningEffortResult = modelReasoningEffortSchema.safeParse(
-      raw.modelReasoningEffort
-    );
-    const modelReasoningEffort = modelReasoningEffortResult.success
-      ? modelReasoningEffortResult.data
-      : undefined;
-    if (raw.modelReasoningEffort !== undefined && !modelReasoningEffortResult.success) {
-      getLog().warn(
-        { filename, value: raw.modelReasoningEffort, valid: modelReasoningEffortSchema.options },
-        'invalid_model_reasoning_effort'
-      );
-    }
-
-    // Validate webSearchMode — warn and ignore invalid values (preserve original behavior)
-    const webSearchModeResult = webSearchModeSchema.safeParse(raw.webSearchMode);
-    const webSearchMode = webSearchModeResult.success ? webSearchModeResult.data : undefined;
-    if (raw.webSearchMode !== undefined && !webSearchModeResult.success) {
-      getLog().warn(
-        { filename, value: raw.webSearchMode, valid: webSearchModeSchema.options },
-        'invalid_web_search_mode'
-      );
     }
 
     // Filter additionalDirectories — warn on non-strings (preserve original behavior)
@@ -367,8 +340,6 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
         description: raw.description,
         provider,
         model,
-        modelReasoningEffort,
-        webSearchMode,
         additionalDirectories,
         interactive,
         nodes: dagNodes,

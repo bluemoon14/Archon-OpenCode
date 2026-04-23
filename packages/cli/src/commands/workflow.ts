@@ -187,8 +187,6 @@ interface WorkflowJsonEntry {
   description: string;
   provider?: string;
   model?: string;
-  modelReasoningEffort?: string;
-  webSearchMode?: string;
 }
 
 /**
@@ -206,9 +204,6 @@ export async function workflowListCommand(cwd: string, json?: boolean): Promise<
         };
         if (w.provider !== undefined) entry.provider = w.provider;
         if (w.model !== undefined) entry.model = w.model;
-        if (w.modelReasoningEffort !== undefined)
-          entry.modelReasoningEffort = w.modelReasoningEffort;
-        if (w.webSearchMode !== undefined) entry.webSearchMode = w.webSearchMode;
         return entry;
       }),
       errors: errors.map(e => ({
@@ -360,9 +355,7 @@ export async function workflowRunCommand(
     conversation = await conversationDb.getOrCreateConversation('cli', conversationId);
   } catch (error) {
     const err = error as Error;
-    throw new Error(
-      `Failed to access database: ${err.message}\nHint: Check that DATABASE_URL is set and the database is running.`
-    );
+    throw new Error(`Failed to access database: ${err.message}`);
   }
 
   // Try to find a codebase for this directory
@@ -375,16 +368,6 @@ export async function workflowRunCommand(
     const err = error as Error;
     codebaseLookupError = err;
     getLog().warn({ err, cwd }, 'cli.codebase_lookup_failed');
-    if (
-      err.message.includes('connect') ||
-      err.message.includes('ECONNREFUSED') ||
-      err.message.includes('ETIMEDOUT')
-    ) {
-      getLog().warn(
-        { hint: 'Check DATABASE_URL and that the database is running.' },
-        'cli.db_connection_hint'
-      );
-    }
   }
 
   // If the caller supplied a codebase ID (e.g., from a stored run record on resume),

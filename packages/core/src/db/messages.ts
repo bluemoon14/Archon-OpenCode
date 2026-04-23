@@ -1,7 +1,7 @@
 /**
  * Database operations for conversation messages (Web UI history and orchestrator prompt enrichment)
  */
-import { pool, getDialect, getDatabaseType } from './connection';
+import { pool, getDialect } from './connection';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -74,16 +74,11 @@ export async function getRecentWorkflowResultMessages(
   conversationId: string,
   limit = 3
 ): Promise<readonly MessageRow[]> {
-  const dbType = getDatabaseType();
-  const metadataFilter =
-    dbType === 'postgresql'
-      ? "(metadata->>'workflowResult') IS NOT NULL"
-      : "json_extract(metadata, '$.workflowResult') IS NOT NULL";
   try {
     const result = await pool.query<Pick<MessageRow, 'id' | 'content' | 'metadata'>>(
       `SELECT id, content, metadata FROM remote_agent_messages
        WHERE conversation_id = $1
-       AND ${metadataFilter}
+       AND json_extract(metadata, '$.workflowResult') IS NOT NULL
        ORDER BY created_at DESC
        LIMIT $2`,
       [conversationId, limit]

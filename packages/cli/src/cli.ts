@@ -31,12 +31,9 @@ if (!process.env.CLAUDE_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
   }
 }
 
-// DATABASE_URL is no longer required - SQLite will be used as default
-
 // Bootstrap provider registry before any provider lookups
-import { registerBuiltinProviders, registerCommunityProviders } from '@archon/providers';
+import { registerBuiltinProviders } from '@archon/providers';
 registerBuiltinProviders();
-registerCommunityProviders();
 
 // Import commands after dotenv is loaded
 import { versionCommand } from './commands/version';
@@ -63,7 +60,6 @@ import { continueCommand } from './commands/continue';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
 import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
-import { serveCommand } from './commands/serve';
 import { closeDatabase } from '@archon/core';
 import {
   setLogLevel,
@@ -102,7 +98,6 @@ Commands:
   isolation cleanup --merged Remove environments with branches merged into main
   continue <branch> [msg]    Continue work on an existing worktree with prior context
   complete <branch> [...]    Complete branch lifecycle (remove worktree + branches)
-  serve                      Start the web UI server (downloads web UI on first run)
   validate workflows [name]  Validate workflow definitions and their references
   validate commands [name]   Validate command files
   version                    Show version info
@@ -120,8 +115,6 @@ Options:
   --json                     Output machine-readable JSON (for workflow list)
   --workflow <name>          Workflow to run for 'continue' (default: archon-assist)
   --no-context               Skip context injection for 'continue'
-  --port <port>              Override server port for 'serve' (default: 3090)
-  --download-only            Download web UI without starting the server
 
 Examples:
   archon chat "What does the orchestrator do?"
@@ -199,8 +192,6 @@ async function main(): Promise<number> {
         reason: { type: 'string' },
         workflow: { type: 'string' },
         'no-context': { type: 'boolean' },
-        port: { type: 'string' },
-        'download-only': { type: 'boolean' },
         scope: { type: 'string' },
         force: { type: 'boolean' },
       },
@@ -235,7 +226,7 @@ async function main(): Promise<number> {
   const subcommand = positionals[1];
 
   // Commands that don't require git repo validation
-  const noGitCommands = ['version', 'help', 'setup', 'chat', 'continue', 'serve'];
+  const noGitCommands = ['version', 'help', 'setup', 'chat', 'continue'];
   const requiresGitRepo = !noGitCommands.includes(command ?? '');
 
   try {
@@ -560,12 +551,6 @@ async function main(): Promise<number> {
           noContext: noContextFlag,
         });
         break;
-      }
-
-      case 'serve': {
-        const servePort = values.port !== undefined ? Number(values.port) : undefined;
-        const downloadOnly = Boolean(values['download-only']);
-        return await serveCommand({ port: servePort, downloadOnly });
       }
 
       default:

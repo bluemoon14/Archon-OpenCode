@@ -13,9 +13,6 @@ export type {
   TokenUsage,
 } from './types';
 
-// Provider config types (canonical definitions in ./types, re-exported via config modules)
-// Import from ./types directly or from the config modules — both work.
-
 // Registry
 export {
   registerProvider,
@@ -26,7 +23,6 @@ export {
   getProviderInfoList,
   isRegisteredProvider,
   registerBuiltinProviders,
-  registerCommunityProviders,
   clearRegistry,
 } from './registry';
 
@@ -35,21 +31,9 @@ export { UnknownProviderError } from './errors';
 
 // Provider classes
 export { ClaudeProvider } from './claude/provider';
-export { CodexProvider } from './codex/provider';
 
 // Config parsers
 export { parseClaudeConfig, type ClaudeProviderDefaults } from './claude/config';
-export { parseCodexConfig, type CodexProviderDefaults } from './codex/config';
 
 // Utilities (needed by consumers)
-export { resetCodexSingleton } from './codex/provider';
-export { resolveCodexBinaryPath, fileExists as codexFileExists } from './codex/binary-resolver';
 export { resolveClaudeBinaryPath, fileExists as claudeFileExists } from './claude/binary-resolver';
-
-// Community providers
-export {
-  PiProvider,
-  parsePiConfig,
-  registerPiProvider,
-  type PiProviderDefaults,
-} from './community/pi';

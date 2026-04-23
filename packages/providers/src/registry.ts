@@ -1,8 +1,9 @@
 /**
  * Provider Registry
  *
- * Typed registry where each entry is a ProviderRegistration record (factory + metadata).
- * Replaces the hardcoded factory switch from Phase 1.
+ * Currently supports Claude only. The registry pattern is retained as a thin
+ * abstraction so the system stays open to future providers without rewiring
+ * the orchestrator and workflow executor.
  *
  * Bootstrap: callers must call registerBuiltinProviders() at process entrypoints
  * (server startup, CLI init) before any provider lookups.
@@ -14,10 +15,7 @@ import type {
   ProviderInfo,
 } from './types';
 import { ClaudeProvider } from './claude/provider';
-import { CodexProvider } from './codex/provider';
 import { CLAUDE_CAPABILITIES } from './claude/capabilities';
-import { CODEX_CAPABILITIES } from './codex/capabilities';
-import { registerPiProvider } from './community/pi/registration';
 import { UnknownProviderError } from './errors';
 import { createLogger } from '@archon/paths';
 
@@ -102,7 +100,7 @@ export function isRegisteredProvider(id: string): boolean {
 }
 
 /**
- * Register built-in providers (Claude, Codex). Idempotent — skips already-registered IDs.
+ * Register built-in providers. Idempotent — skips already-registered IDs.
  * Must be called at process entrypoints (server, CLI) before any provider lookups.
  */
 export function registerBuiltinProviders(): void {
@@ -118,19 +116,6 @@ export function registerBuiltinProviders(): void {
       },
       builtIn: true,
     },
-    {
-      id: 'codex',
-      displayName: 'Codex (OpenAI)',
-      factory: () => new CodexProvider(),
-      capabilities: CODEX_CAPABILITIES,
-      isModelCompatible: (model: string): boolean => {
-        const claudeAliases = ['sonnet', 'opus', 'haiku'];
-        return (
-          !claudeAliases.includes(model) && !model.startsWith('claude-') && model !== 'inherit'
-        );
-      },
-      builtIn: true,
-    },
   ];
 
   for (const entry of builtins) {
@@ -139,30 +124,6 @@ export function registerBuiltinProviders(): void {
       getLog().debug({ provider: entry.id }, 'builtin_provider.registered');
     }
   }
-}
-
-/**
- * Register all bundled community providers in one call.
- *
- * Process entrypoints (server, CLI, config-loader) call this once after
- * `registerBuiltinProviders()`. Adding a new community provider means:
- *   1. Drop the implementation under `packages/providers/src/community/<id>/`.
- *   2. Export a `register<Name>Provider()` function from it.
- *   3. Import + call it here.
- *
- * That's the entire cross-cutting change outside the provider's own
- * directory. No entrypoint edits, no config-type edits — just add a line
- * to this function. That's the Phase 2 contract (#1195): community
- * providers are a localized addition.
- *
- * Each `register*Provider` is itself idempotent, so calling this
- * aggregator multiple times (e.g. from both CLI and config-loader paths)
- * is safe. Errors during registration are not caught here — a broken
- * community provider should fail loud at bootstrap, not silently
- * disappear.
- */
-export function registerCommunityProviders(): void {
-  registerPiProvider();
 }
 
 /** @internal Test-only — clears the registry. Not for production use. */

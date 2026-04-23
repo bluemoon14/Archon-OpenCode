@@ -81,10 +81,6 @@ describe('setup command', () => {
         `
 CLAUDE_USE_GLOBAL_AUTH=true
 GITHUB_TOKEN=ghp_test
-CODEX_ID_TOKEN=token1
-CODEX_ACCESS_TOKEN=token2
-CODEX_REFRESH_TOKEN=token3
-CODEX_ACCOUNT_ID=account1
 `.trim()
       );
 
@@ -95,30 +91,8 @@ CODEX_ACCOUNT_ID=account1
 
       expect(result).not.toBeNull();
       expect(result?.hasClaude).toBe(true);
-      expect(result?.hasCodex).toBe(true);
       expect(result?.platforms.github).toBe(true);
-      expect(result?.hasDatabase).toBe(false);
-
-      if (originalHome === undefined) {
-        delete process.env.ARCHON_HOME;
-      } else {
-        process.env.ARCHON_HOME = originalHome;
-      }
-    });
-
-    it('should detect PostgreSQL database configuration', () => {
-      const envDir = join(TEST_DIR, '.archon2');
-      mkdirSync(envDir, { recursive: true });
-      const envPath = join(envDir, '.env');
-
-      writeFileSync(envPath, 'DATABASE_URL=postgresql://localhost:5432/test');
-
-      const originalHome = process.env.ARCHON_HOME;
-      process.env.ARCHON_HOME = envDir;
-
-      const result = checkExistingConfig();
-
-      expect(result).not.toBeNull();
+      // hasDatabase is true whenever an env file exists (SQLite is the default at ~/.archon/archon.db)
       expect(result?.hasDatabase).toBe(true);
 
       if (originalHome === undefined) {
@@ -136,7 +110,6 @@ CODEX_ACCOUNT_ID=account1
         ai: {
           claude: true,
           claudeAuthType: 'global',
-          codex: false,
           defaultAssistant: 'claude',
         },
         platforms: {
@@ -145,7 +118,7 @@ CODEX_ACCOUNT_ID=account1
         botDisplayName: 'Archon',
       });
 
-      expect(content).toContain('# Using SQLite (default)');
+      expect(content).toContain('# Database: SQLite at ~/.archon/archon.db');
       expect(content).toContain('CLAUDE_USE_GLOBAL_AUTH=true');
       expect(content).toContain('DEFAULT_AI_ASSISTANT=claude');
       // PORT is intentionally commented out — server and Vite both default to 3090 when unset (#1152).
@@ -154,14 +127,13 @@ CODEX_ACCOUNT_ID=account1
       expect(content).not.toContain('DATABASE_URL=');
     });
 
-    it('should generate valid .env content for PostgreSQL configuration', () => {
+    it('should generate valid .env content with API key auth', () => {
       const content = generateEnvContent({
-        database: { type: 'postgresql', url: 'postgresql://localhost:5432/archon' },
+        database: { type: 'sqlite' },
         ai: {
           claude: true,
           claudeAuthType: 'apiKey',
           claudeApiKey: 'sk-test-key',
-          codex: false,
           defaultAssistant: 'claude',
         },
         platforms: {
@@ -170,7 +142,6 @@ CODEX_ACCOUNT_ID=account1
         botDisplayName: 'Archon',
       });
 
-      expect(content).toContain('DATABASE_URL=postgresql://localhost:5432/archon');
       expect(content).toContain('CLAUDE_USE_GLOBAL_AUTH=false');
       expect(content).toContain('CLAUDE_API_KEY=sk-test-key');
     });
@@ -182,7 +153,6 @@ CODEX_ACCOUNT_ID=account1
           claude: true,
           claudeAuthType: 'global',
           claudeBinaryPath: '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
-          codex: false,
           defaultAssistant: 'claude',
         },
         platforms: { github: false },
@@ -200,7 +170,6 @@ CODEX_ACCOUNT_ID=account1
         ai: {
           claude: true,
           claudeAuthType: 'global',
-          codex: false,
           defaultAssistant: 'claude',
         },
         platforms: { github: false },
@@ -216,7 +185,6 @@ CODEX_ACCOUNT_ID=account1
         ai: {
           claude: true,
           claudeAuthType: 'global',
-          codex: false,
           defaultAssistant: 'claude',
         },
         platforms: {
@@ -238,40 +206,12 @@ CODEX_ACCOUNT_ID=account1
       expect(content).toContain('GITHUB_BOT_MENTION=mybot');
     });
 
-    it('should include Codex tokens when configured', () => {
-      const content = generateEnvContent({
-        database: { type: 'sqlite' },
-        ai: {
-          claude: false,
-          codex: true,
-          codexTokens: {
-            idToken: 'id-token',
-            accessToken: 'access-token',
-            refreshToken: 'refresh-token',
-            accountId: 'account-id',
-          },
-          defaultAssistant: 'codex',
-        },
-        platforms: {
-          github: false,
-        },
-        botDisplayName: 'Archon',
-      });
-
-      expect(content).toContain('CODEX_ID_TOKEN=id-token');
-      expect(content).toContain('CODEX_ACCESS_TOKEN=access-token');
-      expect(content).toContain('CODEX_REFRESH_TOKEN=refresh-token');
-      expect(content).toContain('CODEX_ACCOUNT_ID=account-id');
-      expect(content).toContain('DEFAULT_AI_ASSISTANT=codex');
-    });
-
     it('should include custom bot display name', () => {
       const content = generateEnvContent({
         database: { type: 'sqlite' },
         ai: {
           claude: true,
           claudeAuthType: 'global',
-          codex: false,
           defaultAssistant: 'claude',
         },
         platforms: {
@@ -289,7 +229,6 @@ CODEX_ACCOUNT_ID=account1
         ai: {
           claude: true,
           claudeAuthType: 'global',
-          codex: false,
           defaultAssistant: 'claude',
         },
         platforms: {
@@ -399,21 +338,16 @@ describe('detectClaudeExecutablePath probe order', () => {
 
   it('returns the native installer path when present (tier 1 wins)', () => {
     // Native path exists; subsequent probes must not be called.
-    fileExistsSpy.mockImplementation(
-      (p: string) => p.includes('.local/bin/claude') || p.includes('.local\\bin\\claude')
-    );
+    fileExistsSpy.mockImplementation((p: string) => p.includes('.local/bin/claude'));
     const result = detectClaudeExecutablePath();
     expect(result).toBeTruthy();
-    expect(result).toMatch(/\.local[\\/]bin[\\/]claude/);
+    expect(result).toMatch(/\.local\/bin\/claude/);
     // Tier 2 / 3 must not have been consulted.
     expect(npmRootSpy).not.toHaveBeenCalled();
     expect(whichSpy).not.toHaveBeenCalled();
   });
 
   it('falls through to npm cli.js when native is missing (tier 2 wins)', () => {
-    // Use path.join so the expected result matches whatever separator the
-    // production code produces on the current platform (backslash on Windows,
-    // forward slash elsewhere).
     const npmRoot = join('fake', 'npm', 'root');
     const expectedCliJs = join(npmRoot, '@anthropic-ai', 'claude-code', 'cli.js');
     npmRootSpy.mockReturnValue(npmRoot);
@@ -424,7 +358,7 @@ describe('detectClaudeExecutablePath probe order', () => {
     expect(whichSpy).not.toHaveBeenCalled();
   });
 
-  it('falls through to which/where when native and npm probes both miss (tier 3 wins)', () => {
+  it('falls through to which when native and npm probes both miss (tier 3 wins)', () => {
     npmRootSpy.mockReturnValue('/fake/npm/root');
     // Native miss, npm cli.js miss, but `which claude` returns a path that exists.
     whichSpy.mockReturnValue('/opt/homebrew/bin/claude');

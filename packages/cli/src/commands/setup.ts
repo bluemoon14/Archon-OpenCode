@@ -3,7 +3,7 @@
  *
  * Guides users through configuring:
  * - Database (SQLite default vs PostgreSQL)
- * - AI assistants (Claude and/or Codex)
+ * - AI assistants (Claude)
  * - Platform connections (GitHub)
  *
  * Writes configuration to one archon-owned env file, chosen by --scope:
@@ -51,8 +51,7 @@ import {
 
 interface SetupConfig {
   database: {
-    type: 'sqlite' | 'postgresql';
-    url?: string;
+    type: 'sqlite';
   };
   ai: {
     claude: boolean;
@@ -62,8 +61,6 @@ interface SetupConfig {
     /** Absolute path to Claude Code SDK's cli.js. Written as CLAUDE_BIN_PATH
      *  in ~/.archon/.env. Required in compiled Archon binaries; harmless in dev. */
     claudeBinaryPath?: string;
-    codex: boolean;
-    codexTokens?: CodexTokens;
     defaultAssistant: string;
   };
   platforms: {
@@ -80,17 +77,9 @@ interface GitHubConfig {
   botMention?: string;
 }
 
-interface CodexTokens {
-  idToken: string;
-  accessToken: string;
-  refreshToken: string;
-  accountId: string;
-}
-
 interface ExistingConfig {
   hasDatabase: boolean;
   hasClaude: boolean;
-  hasCodex: boolean;
   platforms: {
     github: boolean;
   };
@@ -149,8 +138,7 @@ function hasEnvValue(content: string, key: string): boolean {
  */
 function isCommandAvailable(command: string): boolean {
   try {
-    const checkCmd = process.platform === 'win32' ? 'where' : 'which';
-    execSync(`${checkCmd} ${command}`, { stdio: 'ignore' });
+    execSync(`which ${command}`, { stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -181,14 +169,11 @@ export function probeNpmRoot(): string | null {
 
 export function probeWhichClaude(): string | null {
   try {
-    const checkCmd = process.platform === 'win32' ? 'where' : 'which';
-    const resolved = execSync(`${checkCmd} claude`, {
+    const resolved = execSync('which claude', {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    // On Windows, `where` can return multiple lines — take the first.
-    const first = resolved.split(/\r?\n/)[0]?.trim();
-    return first ?? null;
+    return resolved || null;
   } catch {
     return null;
   }
@@ -204,9 +189,9 @@ export function probeWhichClaude(): string | null {
  *   - A JS `cli.js` (from `npm install -g @anthropic-ai/claude-code` — older path)
  *
  * We probe the well-known install locations in order:
- *   1. Native installer (`~/.local/bin/claude` on macOS/Linux, `%USERPROFILE%\.local\bin\claude.exe` on Windows)
+ *   1. Native installer (`~/.local/bin/claude`)
  *   2. npm global `cli.js`
- *   3. `which claude` / `where claude` — fallback if the user installed via Homebrew, winget, or a custom layout
+ *   3. `which claude` — fallback if the user installed via Homebrew or a custom layout
  *
  * Returns null on total failure so the caller can prompt the user.
  * Detection is best-effort; the caller should let users override.
@@ -216,10 +201,7 @@ export function probeWhichClaude(): string | null {
  */
 export function detectClaudeExecutablePath(): string | null {
   // 1. Native installer default location (primary Anthropic-recommended path)
-  const nativePath =
-    process.platform === 'win32'
-      ? join(homedir(), '.local', 'bin', 'claude.exe')
-      : join(homedir(), '.local', 'bin', 'claude');
+  const nativePath = join(homedir(), '.local', 'bin', 'claude');
   if (probeFileExists(nativePath)) return nativePath;
 
   // 2. npm global cli.js
@@ -229,32 +211,11 @@ export function detectClaudeExecutablePath(): string | null {
     if (probeFileExists(npmCliJs)) return npmCliJs;
   }
 
-  // 3. Fallback: resolve via `which` / `where` (Homebrew, winget, custom layouts)
+  // 3. Fallback: resolve via `which` (Homebrew, custom layouts)
   const fromPath = probeWhichClaude();
   if (fromPath && probeFileExists(fromPath)) return fromPath;
 
   return null;
-}
-
-/**
- * Get Node.js version if installed, or null if not
- */
-function getNodeVersion(): { major: number; minor: number; patch: number } | null {
-  try {
-    const output = execSync('node --version', { encoding: 'utf-8' }).trim();
-    // Output is like "v18.17.0" or "v22.1.0"
-    const match = /^v(\d+)\.(\d+)\.(\d+)/.exec(output);
-    if (match) {
-      return {
-        major: parseInt(match[1], 10),
-        minor: parseInt(match[2], 10),
-        patch: parseInt(match[3], 10),
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -276,30 +237,6 @@ Install using one of these methods:
 
 After installation, run: claude /login`,
   },
-  codex: {
-    name: 'Codex CLI',
-    checkCommand: 'codex',
-    instructions:
-      process.platform === 'darwin'
-        ? `Codex CLI is not installed.
-
-Install using one of these methods:
-
-  Recommended for macOS (no Node.js required):
-    brew install codex
-
-  Or via npm (requires Node.js 18+):
-    npm install -g @openai/codex
-
-After installation, run 'codex' to authenticate.`
-        : `Codex CLI is not installed.
-
-Install via npm:
-    npm install -g @openai/codex
-
-Requires Node.js 18 or later.
-After installation, run 'codex' to authenticate.`,
-  },
 };
 
 /**
@@ -318,16 +255,11 @@ export function checkExistingConfig(envPath?: string): ExistingConfig | null {
   const content = readFileSync(path, 'utf-8');
 
   return {
-    hasDatabase: hasEnvValue(content, 'DATABASE_URL'),
+    hasDatabase: true,
     hasClaude:
       hasEnvValue(content, 'CLAUDE_API_KEY') ||
       hasEnvValue(content, 'CLAUDE_CODE_OAUTH_TOKEN') ||
       hasEnvValue(content, 'CLAUDE_USE_GLOBAL_AUTH'),
-    hasCodex:
-      hasEnvValue(content, 'CODEX_ID_TOKEN') &&
-      hasEnvValue(content, 'CODEX_ACCESS_TOKEN') &&
-      hasEnvValue(content, 'CODEX_REFRESH_TOKEN') &&
-      hasEnvValue(content, 'CODEX_ACCOUNT_ID'),
     platforms: {
       github: hasEnvValue(content, 'GITHUB_TOKEN') || hasEnvValue(content, 'GH_TOKEN'),
     },
@@ -338,92 +270,8 @@ export function checkExistingConfig(envPath?: string): ExistingConfig | null {
 // Data Collection Functions
 // =============================================================================
 
-/**
- * Collect database configuration
- */
 async function collectDatabaseConfig(): Promise<SetupConfig['database']> {
-  const dbType = await select({
-    message: 'Which database do you want to use?',
-    options: [
-      {
-        value: 'sqlite',
-        label: 'SQLite (default - no setup needed)',
-        hint: 'Recommended for single user',
-      },
-      { value: 'postgresql', label: 'PostgreSQL', hint: 'For server deployments' },
-    ],
-  });
-
-  if (isCancel(dbType)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  if (dbType === 'postgresql') {
-    const url = await text({
-      message: 'Enter your PostgreSQL connection string:',
-      placeholder: 'postgresql://user:pass@localhost:5432/archon',
-      validate: value => {
-        if (!value) {
-          return 'Connection string is required';
-        }
-        if (!value.startsWith('postgresql://') && !value.startsWith('postgres://')) {
-          return 'Must be a valid PostgreSQL URL (postgresql:// or postgres://)';
-        }
-        return undefined;
-      },
-    });
-
-    if (isCancel(url)) {
-      cancel('Setup cancelled.');
-      process.exit(0);
-    }
-
-    return { type: 'postgresql', url };
-  }
-
   return { type: 'sqlite' };
-}
-
-/**
- * Try to read Codex tokens from ~/.codex/auth.json
- */
-function tryReadCodexAuth(): CodexTokens | null {
-  const authPath = join(homedir(), '.codex', 'auth.json');
-
-  if (!existsSync(authPath)) {
-    return null;
-  }
-
-  try {
-    const content = readFileSync(authPath, 'utf-8');
-    const auth = JSON.parse(content) as {
-      tokens?: {
-        id_token?: string;
-        access_token?: string;
-        refresh_token?: string;
-        account_id?: string;
-      };
-    };
-
-    if (
-      auth.tokens?.id_token &&
-      auth.tokens?.access_token &&
-      auth.tokens?.refresh_token &&
-      auth.tokens?.account_id
-    ) {
-      return {
-        idToken: auth.tokens.id_token,
-        accessToken: auth.tokens.access_token,
-        refreshToken: auth.tokens.refresh_token,
-        accountId: auth.tokens.account_id,
-      };
-    }
-  } catch {
-    // Invalid JSON or other error
-  }
-
-  return null;
 }
 
 /**
@@ -450,15 +298,13 @@ async function collectClaudeBinaryPath(): Promise<string | undefined> {
     if (useDetected) return detected;
   }
 
-  const nativeExample =
-    process.platform === 'win32' ? '%USERPROFILE%\\.local\\bin\\claude.exe' : '~/.local/bin/claude';
+  const nativeExample = '~/.local/bin/claude';
 
   note(
     'Compiled Archon binaries need CLAUDE_BIN_PATH set to the Claude Code executable.\n' +
       'In dev (`bun run`) this is ignored — the SDK resolves it via node_modules.\n\n' +
       'Recommended (Anthropic default — native installer):\n' +
-      `  macOS/Linux: ${nativeExample}\n` +
-      '  Windows:     %USERPROFILE%\\.local\\bin\\claude.exe\n\n' +
+      `  ${nativeExample}\n\n` +
       'Alternative (npm global install):\n' +
       '  $(npm root -g)/@anthropic-ai/claude-code/cli.js',
     'Claude binary path'
@@ -558,134 +404,14 @@ async function collectClaudeAuth(): Promise<{
 }
 
 /**
- * Collect Codex authentication
- */
-async function collectCodexAuth(): Promise<CodexTokens | null> {
-  // Try to auto-import from ~/.codex/auth.json
-  const existingAuth = tryReadCodexAuth();
-
-  if (existingAuth) {
-    const useExisting = await confirm({
-      message: 'Found existing Codex auth at ~/.codex/auth.json. Use it?',
-    });
-
-    if (isCancel(useExisting)) {
-      cancel('Setup cancelled.');
-      process.exit(0);
-    }
-
-    if (useExisting) {
-      return existingAuth;
-    }
-  } else {
-    note(
-      'Codex requires authentication tokens.\n\n' +
-        'To get them:\n' +
-        '1. Run `codex login` in your terminal\n' +
-        '2. Complete the login flow\n' +
-        '3. Tokens will be saved to ~/.codex/auth.json\n\n' +
-        'You can skip Codex setup now and run `archon setup` again later.',
-      'Codex Auth'
-    );
-  }
-
-  const enterManually = await confirm({
-    message: 'Enter Codex tokens manually?',
-  });
-
-  if (isCancel(enterManually)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  if (!enterManually) {
-    return null;
-  }
-
-  const idToken = await password({
-    message: 'Enter CODEX_ID_TOKEN:',
-    validate: value => {
-      if (!value) return 'Token is required';
-      return undefined;
-    },
-  });
-
-  if (isCancel(idToken)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  const accessToken = await password({
-    message: 'Enter CODEX_ACCESS_TOKEN:',
-    validate: value => {
-      if (!value) return 'Token is required';
-      return undefined;
-    },
-  });
-
-  if (isCancel(accessToken)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  const refreshToken = await password({
-    message: 'Enter CODEX_REFRESH_TOKEN:',
-    validate: value => {
-      if (!value) return 'Token is required';
-      return undefined;
-    },
-  });
-
-  if (isCancel(refreshToken)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  const accountId = await text({
-    message: 'Enter CODEX_ACCOUNT_ID:',
-    validate: value => {
-      if (!value) return 'Account ID is required';
-      return undefined;
-    },
-  });
-
-  if (isCancel(accountId)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  return {
-    idToken,
-    accessToken,
-    refreshToken,
-    accountId,
-  };
-}
-
-/**
- * Collect AI assistant configuration
+ * Collect AI assistant configuration. Currently only Claude is supported.
  */
 async function collectAIConfig(): Promise<SetupConfig['ai']> {
-  const assistants = await multiselect({
-    message:
-      'Which built-in AI assistant(s) will you use? (↑↓ navigate, space select, enter confirm)',
-    options: [
-      { value: 'claude', label: 'Claude (Recommended)', hint: 'Anthropic Claude Code SDK' },
-      { value: 'codex', label: 'Codex', hint: 'OpenAI Codex SDK' },
-    ],
-    required: false,
-  });
+  let hasClaude = true;
+  const defaultAssistant = getRegisteredProviders().find(p => p.builtIn)?.id ?? 'claude';
 
-  if (isCancel(assistants)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  let hasClaude = assistants.includes('claude');
-  let hasCodex = assistants.includes('codex');
-
-  // Check if selected CLI tools are installed
-  if (hasClaude && !isCommandAvailable('claude')) {
+  // Check if Claude CLI is installed
+  if (!isCommandAvailable('claude')) {
     note(CLI_INSTALL_INSTRUCTIONS.claude.instructions, 'Claude Code Not Found');
     const continueWithoutClaude = await confirm({
       message: 'Continue setup without Claude?',
@@ -702,151 +428,20 @@ async function collectAIConfig(): Promise<SetupConfig['ai']> {
     hasClaude = false;
   }
 
-  if (hasCodex && !isCommandAvailable('codex')) {
-    // On non-macOS platforms, npm is the only install method and requires Node.js 18+
-    if (process.platform !== 'darwin') {
-      const nodeVersion = getNodeVersion();
-      if (!nodeVersion) {
-        note(
-          `Node.js is required to install Codex CLI via npm.
-
-Install Node.js 18 or later from:
-    https://nodejs.org/
-
-Or use a version manager like nvm:
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash
-    nvm install 18
-
-After installing Node.js, run 'archon setup' again.`,
-          'Node.js Not Found'
-        );
-        const continueWithoutCodex = await confirm({
-          message: 'Continue setup without Codex?',
-          initialValue: false,
-        });
-        if (isCancel(continueWithoutCodex)) {
-          cancel('Setup cancelled.');
-          process.exit(0);
-        }
-        if (!continueWithoutCodex) {
-          cancel('Please install Node.js 18+ and run setup again.');
-          process.exit(0);
-        }
-        hasCodex = false;
-      } else if (nodeVersion.major < 18) {
-        note(
-          `Node.js ${nodeVersion.major}.${nodeVersion.minor}.${nodeVersion.patch} is installed, but Codex CLI requires Node.js 18 or later.
-
-Upgrade Node.js from:
-    https://nodejs.org/
-
-Or use a version manager like nvm:
-    nvm install 18
-    nvm use 18
-
-After upgrading, run 'archon setup' again.`,
-          'Node.js Version Too Old'
-        );
-        const continueWithoutCodex = await confirm({
-          message: 'Continue setup without Codex?',
-          initialValue: false,
-        });
-        if (isCancel(continueWithoutCodex)) {
-          cancel('Setup cancelled.');
-          process.exit(0);
-        }
-        if (!continueWithoutCodex) {
-          cancel('Please upgrade Node.js to 18+ and run setup again.');
-          process.exit(0);
-        }
-        hasCodex = false;
-      }
-    }
-
-    // If we still want Codex (Node check passed or on macOS), show install instructions
-    if (hasCodex) {
-      note(CLI_INSTALL_INSTRUCTIONS.codex.instructions, 'Codex CLI Not Found');
-      const continueWithoutCodex = await confirm({
-        message: 'Continue setup without Codex?',
-        initialValue: false,
-      });
-      if (isCancel(continueWithoutCodex)) {
-        cancel('Setup cancelled.');
-        process.exit(0);
-      }
-      if (!continueWithoutCodex) {
-        cancel('Please install Codex CLI and run setup again.');
-        process.exit(0);
-      }
-      hasCodex = false;
-    }
+  if (!hasClaude) {
+    log.warning('Claude not configured. Run `archon setup` again after installing Claude Code.');
+    return { claude: false, defaultAssistant };
   }
 
-  if (!hasClaude && !hasCodex) {
-    log.warning('No AI assistant selected. You can add one later by running `archon setup` again.');
-    return {
-      claude: false,
-      codex: false,
-      defaultAssistant: getRegisteredProviders().find(p => p.builtIn)?.id ?? 'claude',
-    };
-  }
-
-  let claudeAuthType: 'global' | 'apiKey' | 'oauthToken' | undefined;
-  let claudeApiKey: string | undefined;
-  let claudeOauthToken: string | undefined;
-  let claudeBinaryPath: string | undefined;
-  let codexTokens: CodexTokens | undefined;
-
-  // Collect Claude auth if selected
-  if (hasClaude) {
-    const claudeAuth = await collectClaudeAuth();
-    claudeAuthType = claudeAuth.authType;
-    claudeApiKey = claudeAuth.apiKey;
-    claudeOauthToken = claudeAuth.oauthToken;
-    claudeBinaryPath = await collectClaudeBinaryPath();
-  }
-
-  // Collect Codex auth if selected
-  if (hasCodex) {
-    const tokens = await collectCodexAuth();
-    codexTokens = tokens ?? undefined;
-  }
-
-  // Determine default assistant — use the registry, but keep setup/auth flows built-in only.
-  // Default to first registered built-in provider rather than hardcoding 'claude'.
-  let defaultAssistant = getRegisteredProviders().find(p => p.builtIn)?.id ?? 'claude';
-
-  if (hasClaude && hasCodex) {
-    const providerChoices = getRegisteredProviders()
-      .filter(p => p.builtIn)
-      .map(p => ({
-        value: p.id,
-        label: p.id === 'claude' ? `${p.displayName} (Recommended)` : p.displayName,
-      }));
-
-    const defaultChoice = await select({
-      message: 'Which should be the default AI assistant?',
-      options: providerChoices,
-    });
-
-    if (isCancel(defaultChoice)) {
-      cancel('Setup cancelled.');
-      process.exit(0);
-    }
-
-    defaultAssistant = defaultChoice;
-  } else if (hasCodex && !hasClaude) {
-    defaultAssistant = 'codex';
-  }
+  const claudeAuth = await collectClaudeAuth();
+  const claudeBinaryPath = await collectClaudeBinaryPath();
 
   return {
-    claude: hasClaude,
-    claudeAuthType,
-    claudeApiKey,
-    claudeOauthToken,
+    claude: true,
+    claudeAuthType: claudeAuth.authType,
+    claudeApiKey: claudeAuth.apiKey,
+    claudeOauthToken: claudeAuth.oauthToken,
     ...(claudeBinaryPath !== undefined ? { claudeBinaryPath } : {}),
-    codex: hasCodex,
-    codexTokens,
     defaultAssistant,
   };
 }
@@ -1003,13 +598,8 @@ export function generateEnvContent(config: SetupConfig): string {
   lines.push('# Generated by `archon setup`');
   lines.push('');
 
-  // Database
-  lines.push('# Database');
-  if (config.database.type === 'postgresql' && config.database.url) {
-    lines.push(`DATABASE_URL=${config.database.url}`);
-  } else {
-    lines.push('# Using SQLite (default) - no DATABASE_URL needed');
-  }
+  // Database — always SQLite at ~/.archon/archon.db
+  lines.push('# Database: SQLite at ~/.archon/archon.db');
   lines.push('');
 
   // AI Assistants
@@ -1032,15 +622,6 @@ export function generateEnvContent(config: SetupConfig): string {
     lines.push('# Claude not configured');
   }
   lines.push('');
-
-  if (config.ai.codex && config.ai.codexTokens) {
-    lines.push('# Codex Authentication');
-    lines.push(`CODEX_ID_TOKEN=${config.ai.codexTokens.idToken}`);
-    lines.push(`CODEX_ACCESS_TOKEN=${config.ai.codexTokens.accessToken}`);
-    lines.push(`CODEX_REFRESH_TOKEN=${config.ai.codexTokens.refreshToken}`);
-    lines.push(`CODEX_ACCOUNT_ID=${config.ai.codexTokens.accountId}`);
-    lines.push('');
-  }
 
   // Default AI Assistant
   lines.push('# Default AI Assistant');
@@ -1246,34 +827,6 @@ function trySpawn(
 }
 
 /**
- * Spawn a new terminal window with the setup command on Windows
- * Tries: Windows Terminal -> cmd.exe with start
- */
-function spawnWindowsTerminal(repoPath: string): SpawnResult {
-  // Try Windows Terminal first (modern Windows 10/11)
-  if (
-    trySpawn('wt.exe', ['-d', repoPath, 'cmd', '/k', 'archon setup'], {
-      detached: true,
-      stdio: 'ignore',
-    })
-  ) {
-    return { success: true };
-  }
-
-  // Fallback to cmd.exe with start command (works on all Windows)
-  if (
-    trySpawn('cmd.exe', ['/c', 'start', '""', '/D', repoPath, 'cmd', '/k', 'archon setup'], {
-      detached: true,
-      stdio: 'ignore',
-    })
-  ) {
-    return { success: true };
-  }
-
-  return { success: false, error: 'Could not open terminal. Please run `archon setup` manually.' };
-}
-
-/**
  * Spawn terminal on macOS
  * Uses osascript to open Terminal.app (works with default terminal)
  */
@@ -1347,18 +900,13 @@ function spawnLinuxTerminal(repoPath: string): SpawnResult {
 }
 
 /**
- * Spawn a new terminal window with archon setup
+ * Spawn a new terminal window with archon setup. macOS and Linux only.
  */
 export function spawnTerminalWithSetup(repoPath: string): SpawnResult {
-  const platform = process.platform;
-
-  if (platform === 'win32') {
-    return spawnWindowsTerminal(repoPath);
-  } else if (platform === 'darwin') {
+  if (process.platform === 'darwin') {
     return spawnMacTerminal(repoPath);
-  } else {
-    return spawnLinuxTerminal(repoPath);
   }
+  return spawnLinuxTerminal(repoPath);
 }
 
 // =============================================================================
@@ -1425,7 +973,6 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
     const summary = [
       `Database: ${existing.hasDatabase ? 'PostgreSQL' : 'SQLite'}`,
       `Claude: ${existing.hasClaude ? 'Configured' : 'Not configured'}`,
-      `Codex: ${existing.hasCodex ? 'Configured' : 'Not configured'}`,
       `Platforms: ${configuredPlatforms.length > 0 ? configuredPlatforms.join(', ') : 'None'}`,
     ].join('\n');
 
@@ -1462,7 +1009,6 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
       database: { type: 'sqlite' },
       ai: {
         claude: existing?.hasClaude ?? false,
-        codex: existing?.hasCodex ?? false,
         defaultAssistant: getRegisteredProviders().find(p => p.builtIn)?.id ?? 'claude',
       },
       platforms: {
@@ -1630,12 +1176,9 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
           : 'OAuth token';
     aiConfigured.push(`Claude (${authMethod})`);
   }
-  if (config.ai.codex && config.ai.codexTokens) {
-    aiConfigured.push('Codex');
-  }
 
   const summaryLines = [
-    `Database: ${config.database.type === 'postgresql' ? 'PostgreSQL' : 'SQLite (default)'}`,
+    `Database: SQLite (${config.database.type})`,
     `AI: ${aiConfigured.length > 0 ? aiConfigured.join(', ') : 'None configured'}`,
     `Default: ${config.ai.defaultAssistant}`,
     `Platforms: ${configuredPlatforms.length > 0 ? configuredPlatforms.join(', ') : 'None'}`,

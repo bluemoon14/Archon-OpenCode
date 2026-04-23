@@ -1,7 +1,7 @@
 /**
  * Database operations for workflow runs
  */
-import { pool, getDialect, getDatabaseType } from './connection';
+import { pool, getDialect } from './connection';
 import type { IDatabase } from './adapters/types';
 import type {
   WorkflowRun,
@@ -207,13 +207,8 @@ export async function getActiveWorkflowRunByPath(
   workingPath: string,
   self?: { id: string; startedAt: Date }
 ): Promise<WorkflowRun | null> {
-  const isPostgres = getDatabaseType() === 'postgresql';
-  const stalePendingCutoff = isPostgres
-    ? `NOW() - INTERVAL '${String(STALE_PENDING_AGE_MS)} milliseconds'`
-    : `datetime('now', '-${String(Math.floor(STALE_PENDING_AGE_MS / 1000))} seconds')`;
+  const stalePendingCutoff = `datetime('now', '-${String(Math.floor(STALE_PENDING_AGE_MS / 1000))} seconds')`;
 
-  // Build params + clauses dynamically. Self exclusion + tiebreaker travel
-  // together — the tiebreaker references both ids and timestamps.
   const params: unknown[] = [workingPath];
   const clauses: string[] = [
     'working_path = $1',
@@ -222,30 +217,15 @@ export async function getActiveWorkflowRunByPath(
   if (self !== undefined) {
     params.push(self.id);
     clauses.push(`id != $${String(params.length)}`);
-  }
-  if (self !== undefined) {
-    // Older-wins tiebreaker. (started_at, id) is a total order so both
-    // dispatches always agree on which is "first." Without this, two rows
-    // with similar timestamps could mutually see each other and both abort.
-    //
-    // Serialize Date to ISO string — bun:sqlite rejects Date bindings.
-    //
-    // Format-aware comparison:
-    //   PostgreSQL: started_at is TIMESTAMPTZ; cast the ISO param to
-    //     timestamptz so the comparison is chronological, not lexical.
-    //   SQLite: started_at is TEXT in "YYYY-MM-DD HH:MM:SS" format. Our
-    //     ISO param has "YYYY-MM-DDTHH:MM:SS.mmmZ". Lexical comparison is
-    //     WRONG: char 11 is space (0x20) in the column vs T (0x54) in the
-    //     param, so every column value lex-sorts before every ISO param —
-    //     making `started_at < $param` always TRUE regardless of actual
-    //     time. Wrap both sides in datetime() to force chronological
-    //     comparison via SQLite's date/time functions.
+    // Older-wins tiebreaker using (started_at, id) total order. started_at is
+    // stored as TEXT "YYYY-MM-DD HH:MM:SS" while our ISO param has "...THH...Z";
+    // wrap both in datetime() for chronological comparison instead of lexical.
     params.push(self.startedAt.toISOString());
     const startedAtParam = `$${String(params.length)}`;
     const idParam = `$${String(params.length - 1)}`;
-    const colExpr = isPostgres ? 'started_at' : 'datetime(started_at)';
-    const paramExpr = isPostgres ? `${startedAtParam}::timestamptz` : `datetime(${startedAtParam})`;
-    clauses.push(`(${colExpr} < ${paramExpr} OR (${colExpr} = ${paramExpr} AND id < ${idParam}))`);
+    clauses.push(
+      `(datetime(started_at) < datetime(${startedAtParam}) OR (datetime(started_at) = datetime(${startedAtParam}) AND id < ${idParam}))`
+    );
   }
 
   try {
@@ -697,12 +677,9 @@ function buildDashboardWhereClauses(
 
 /**
  * Returns a SQL fragment to extract and cast an integer from a JSON data column.
- * Handles SQLite (`json_extract`) and PostgreSQL (`->>`/`::INTEGER`) dialects.
  */
 function jsonIntExtract(col: string, key: string): string {
-  return getDatabaseType() === 'postgresql'
-    ? `(${col}->>'${key}')::INTEGER`
-    : `CAST(json_extract(${col}, '$.${key}') AS INTEGER)`;
+  return `CAST(json_extract(${col}, '$.${key}') AS INTEGER)`;
 }
 
 /**
@@ -943,10 +920,7 @@ export async function deleteOldWorkflowRuns(olderThanDays: number): Promise<{ co
       `Invalid olderThanDays: ${String(olderThanDays)} (must be a non-negative integer)`
     );
   }
-  const cutoff =
-    getDatabaseType() === 'postgresql'
-      ? `NOW() - INTERVAL '${String(olderThanDays)} days'`
-      : `datetime('now', '-${String(olderThanDays)} days')`;
+  const cutoff = `datetime('now', '-${String(olderThanDays)} days')`;
   try {
     await pool.query('BEGIN', []);
     // Delete events first (FK reference)
