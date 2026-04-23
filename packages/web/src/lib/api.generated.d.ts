@@ -2489,14 +2489,6 @@ export interface components {
       assistants: {
         [key: string]: components['schemas']['ProviderDefaults'];
       };
-      streaming: {
-        /** @enum {string} */
-        telegram: 'stream' | 'batch';
-        /** @enum {string} */
-        discord: 'stream' | 'batch';
-        /** @enum {string} */
-        slack: 'stream' | 'batch';
-      };
       concurrency: {
         maxConversations: number;
       };

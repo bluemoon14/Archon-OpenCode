@@ -1,6 +1,6 @@
 ## Project Overview
 
-**Remote Agentic Coding Platform**: Control AI coding assistants (Claude Code SDK, Codex SDK) remotely from Slack, Telegram, and GitHub. Built with **Bun + TypeScript + SQLite/PostgreSQL**, single-developer tool for AI-assisted development practitioners. Architecture prioritizes simplicity, flexibility, and user control.
+**Remote Agentic Coding Platform**: Control AI coding assistants (Claude Code SDK, Codex SDK) remotely via Web UI, CLI, and GitHub. Built with **Bun + TypeScript + SQLite/PostgreSQL**, single-developer tool for AI-assisted development practitioners. Architecture prioritizes simplicity, flexibility, and user control.
 
 ## Core Principles
 
@@ -8,7 +8,7 @@
 - No multi-tenant complexity
 
 **Platform Agnostic**
-- Unified conversation interface across Slack/Telegram/GitHub/cli/web
+- Unified conversation interface across Web UI, CLI, and GitHub
 - Platform adapters implement `IPlatformAdapter`
 - Stream/batch AI responses in real-time to all platforms
 
@@ -329,11 +329,9 @@ packages/
 │       ├── archon-paths.ts   # Archon directory path utilities
 │       ├── logger.ts         # Pino logger factory
 │       └── index.ts          # Package exports
-├── adapters/                 # @archon/adapters - Platform adapters (Slack, Telegram, GitHub, Discord)
+├── adapters/                 # @archon/adapters - Platform adapters (GitHub)
 │   └── src/
-│       ├── chat/             # Chat platform adapters (Slack, Telegram)
 │       ├── forge/            # Forge adapters (GitHub)
-│       ├── community/        # Community adapters (Discord)
 │       ├── utils/            # Shared adapter utilities (message splitting)
 │       └── index.ts          # Package exports
 ├── server/                   # @archon/server - HTTP server + Web adapter
@@ -416,7 +414,7 @@ import type { DagNode, WorkflowDefinition } from '@/lib/api';
 - **@archon/workflows**: Workflow engine - loader, router, executor, DAG, logger, bundled defaults (depends only on @archon/git + @archon/paths + @archon/providers/types + @hono/zod-openapi + zod; DB/AI/config injected via `WorkflowDeps`)
 - **@archon/cli**: Command-line interface for running workflows and starting the web UI server (depends on @archon/server + @archon/adapters for the serve command)
 - **@archon/core**: Business logic, database, orchestration (depends on @archon/providers for AI; provides `createWorkflowStore()` adapter bridging core DB → `IWorkflowStore`)
-- **@archon/adapters**: Platform adapters for Slack, Telegram, GitHub, Discord (depends on @archon/core)
+- **@archon/adapters**: Platform adapter for GitHub (depends on @archon/core)
 - **@archon/server**: OpenAPIHono HTTP server (Zod + OpenAPI spec generation via `@hono/zod-openapi`), Web adapter (SSE), API routes, Web UI static serving (depends on @archon/adapters)
 - **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui + Zustand), SSE streaming to server. `WorkflowRunStatus`, `WorkflowDefinition`, and `DagNode` are all derived from `src/lib/api.generated.d.ts` (generated from the OpenAPI spec via `bun generate:types`; never import from `@archon/workflows`)
 
@@ -424,15 +422,12 @@ import type { DagNode, WorkflowDefinition } from '@/lib/api';
 - Implement `IPlatformAdapter` interface
 - Handle platform-specific message formats
 - **Web** (`packages/server/src/adapters/web/`): Server-Sent Events (SSE) streaming, conversation ID = user-provided string
-- **Slack** (`packages/adapters/src/chat/slack/`): SDK with polling (not webhooks), conversation ID = `thread_ts`
-- **Telegram** (`packages/adapters/src/chat/telegram/`): Bot API with polling, conversation ID = `chat_id`
 - **GitHub** (`packages/adapters/src/forge/github/`): Webhooks + GitHub CLI, conversation ID = `owner/repo#number`
-- **Discord** (`packages/adapters/src/community/chat/discord/`): discord.js WebSocket, conversation ID = channel ID
 
 **Adapter Authorization Pattern:**
 - Auth checks happen INSIDE adapters (encapsulation, consistency)
-- Auth utilities co-located with each adapter (e.g., `packages/adapters/src/chat/slack/auth.ts`)
-- Parse whitelist from env var in constructor (e.g., `TELEGRAM_ALLOWED_USER_IDS`)
+- Auth utilities co-located with each adapter (e.g., `packages/adapters/src/forge/github/auth.ts`)
+- Parse whitelist from env var in constructor (e.g., `GITHUB_ALLOWED_USERS`)
 - Check authorization in message handler (before calling `onMessage` callback)
 - Silent rejection for unauthorized users (no error response)
 - Log unauthorized attempts with masked user IDs for privacy

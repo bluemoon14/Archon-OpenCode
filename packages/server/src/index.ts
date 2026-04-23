@@ -1,6 +1,6 @@
 /**
  * Remote Coding Agent - Main Entry Point
- * Multi-platform AI coding assistant (Telegram, Discord, Slack, GitHub, Gitea)
+ * Multi-platform AI coding assistant (Web + GitHub)
  */
 
 // Strip CWD .env keys FIRST — before any application imports read process.env.
@@ -55,26 +55,21 @@ registerCommunityProviders();
 
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { validationErrorHook } from './routes/openapi-defaults';
-import { TelegramAdapter, GitHubAdapter, DiscordAdapter, SlackAdapter } from '@archon/adapters';
-import { GiteaAdapter } from '@archon/adapters/community/forge/gitea';
-import { GitLabAdapter } from '@archon/adapters/community/forge/gitlab';
+import { GitHubAdapter } from '@archon/adapters';
 import { WebAdapter } from './adapters/web';
 import { MessagePersistence } from './adapters/web/persistence';
 import { SSETransport } from './adapters/web/transport';
 import { WorkflowEventBridge } from './adapters/web/workflow-bridge';
 import { registerApiRoutes } from './routes/api';
 import {
-  handleMessage,
   pool,
   ConversationLockManager,
-  classifyAndFormatError,
   startCleanupScheduler,
   stopCleanupScheduler,
   loadConfig,
   logConfig,
   getPort,
 } from '@archon/core';
-import type { IPlatformAdapter } from '@archon/core';
 import { createLogger, logArchonPaths, validateAppDefaultsPaths } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -82,26 +77,6 @@ let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
   if (!cachedLog) cachedLog = createLogger('server');
   return cachedLog;
-}
-
-/**
- * Creates an error handler for message processing failures.
- * Logs the error and attempts to send a user-friendly message to the platform.
- */
-function createMessageErrorHandler(
-  platform: string,
-  adapter: IPlatformAdapter,
-  conversationId: string
-): (error: unknown) => Promise<void> {
-  return async (error: unknown): Promise<void> => {
-    getLog().error({ err: error, platform, conversationId }, 'message_processing_failed');
-    try {
-      const userMessage = classifyAndFormatError(error as Error);
-      await adapter.sendMessage(conversationId, userMessage);
-    } catch (sendError) {
-      getLog().error({ err: sendError, platform, conversationId }, 'error_message_send_failed');
-    }
-  };
 }
 
 /**
@@ -135,7 +110,7 @@ export interface ServerOptions {
   webDistPath?: string;
   /** Override the port. Range: 1–65535. */
   port?: number;
-  /** Run in standalone web-only mode (no Telegram/Slack/GitHub/Discord adapters). */
+  /** Run in standalone web-only mode (no GitHub adapter). */
   skipPlatformAdapters?: boolean;
 }
 
@@ -248,28 +223,15 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
   persistence.startPeriodicFlush();
 
   // Mutable — pushed to as each adapter starts, read by the /api/health endpoint.
-  // Must be a live reference because Telegram starts after the HTTP listener begins
-  // accepting requests, so a snapshot taken at registration time would miss it.
   const activePlatforms: string[] = ['Web'];
 
   // Platform adapters (skipped in CLI serve mode or when not configured)
   let github: GitHubAdapter | null = null;
-  let gitea: GiteaAdapter | null = null;
-  let gitlab: GitLabAdapter | null = null;
-  let discord: DiscordAdapter | null = null;
-  let slack: SlackAdapter | null = null;
 
   if (!opts.skipPlatformAdapters) {
-    // Check that at least one platform is configured
-    const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN);
-    const hasDiscord = Boolean(process.env.DISCORD_BOT_TOKEN);
     const hasGitHub = Boolean(process.env.GITHUB_TOKEN && process.env.WEBHOOK_SECRET);
-    const hasGitea = Boolean(
-      process.env.GITEA_URL && process.env.GITEA_TOKEN && process.env.GITEA_WEBHOOK_SECRET
-    );
-    const hasGitLab = Boolean(process.env.GITLAB_TOKEN && process.env.GITLAB_WEBHOOK_SECRET);
 
-    if (!hasTelegram && !hasDiscord && !hasGitHub && !hasGitea && !hasGitLab) {
+    if (!hasGitHub) {
       getLog().warn('no_platform_adapters_configured');
     }
 
@@ -287,175 +249,6 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
       activePlatforms.push('GitHub');
     } else {
       getLog().info('github_adapter_skipped');
-    }
-
-    // Initialize Gitea adapter (conditional)
-    if (process.env.GITEA_URL && process.env.GITEA_TOKEN && process.env.GITEA_WEBHOOK_SECRET) {
-      const giteaBotMention =
-        process.env.GITEA_BOT_MENTION || process.env.BOT_DISPLAY_NAME || config.botName;
-      gitea = new GiteaAdapter(
-        process.env.GITEA_URL,
-        process.env.GITEA_TOKEN,
-        process.env.GITEA_WEBHOOK_SECRET,
-        lockManager,
-        giteaBotMention
-      );
-      await gitea.start();
-      activePlatforms.push('Gitea');
-    } else {
-      getLog().info('gitea_adapter_skipped');
-    }
-
-    // Initialize GitLab adapter (conditional)
-    if (process.env.GITLAB_TOKEN && process.env.GITLAB_WEBHOOK_SECRET) {
-      const gitlabBotMention =
-        process.env.GITLAB_BOT_MENTION || process.env.BOT_DISPLAY_NAME || config.botName;
-      gitlab = new GitLabAdapter(
-        process.env.GITLAB_TOKEN,
-        process.env.GITLAB_WEBHOOK_SECRET,
-        lockManager,
-        process.env.GITLAB_URL || undefined,
-        gitlabBotMention
-      );
-      await gitlab.start();
-      activePlatforms.push('GitLab');
-    } else {
-      getLog().info('gitlab_adapter_skipped');
-    }
-
-    // Initialize Discord adapter (conditional)
-    if (process.env.DISCORD_BOT_TOKEN) {
-      const discordStreamingMode = (process.env.DISCORD_STREAMING_MODE ?? 'batch') as
-        | 'stream'
-        | 'batch';
-      discord = new DiscordAdapter(process.env.DISCORD_BOT_TOKEN, discordStreamingMode);
-      const discordAdapter = discord; // Capture for use in callback
-
-      // Register message handler
-      discordAdapter.onMessage(async message => {
-        // Get initial conversation ID
-        let conversationId = discordAdapter.getConversationId(message);
-
-        // Skip if no content
-        if (!message.content) return;
-
-        // Check if bot was mentioned (required for activation)
-        // Exception: DMs don't require mention
-        const isDM = !message.guild;
-        if (!isDM && !discordAdapter.isBotMentioned(message)) {
-          return; // Ignore messages that don't mention the bot
-        }
-
-        // Strip the bot mention from the message
-        const content = discordAdapter.stripBotMention(message);
-        if (!content) return; // Message was only a mention with no content
-
-        // Ensure we're responding in a thread - creates one if needed
-        conversationId = await discordAdapter.ensureThread(conversationId, message);
-
-        // Check for thread context (now we're guaranteed to be in a thread if applicable)
-        let threadContext: string | undefined;
-        let parentConversationId: string | undefined;
-
-        if (discordAdapter.isThread(message)) {
-          // Fetch thread history for context (exclude current message)
-          const history = await discordAdapter.fetchThreadHistory(message);
-          if (history.length > 1) {
-            threadContext = history.slice(0, -1).join('\n');
-          }
-
-          // Get parent channel ID for context inheritance
-          parentConversationId = discordAdapter.getParentChannelId(message) ?? undefined;
-        }
-
-        // Fire-and-forget: handler returns immediately, processing happens async
-        lockManager
-          .acquireLock(conversationId, async () => {
-            await handleMessage(discordAdapter, conversationId, content, {
-              threadContext,
-              parentConversationId,
-              isolationHints: { workflowType: 'thread', workflowId: conversationId },
-            });
-          })
-          .catch(createMessageErrorHandler('Discord', discordAdapter, conversationId));
-      });
-
-      // Don't let a Discord login failure (bad token, missing privileged
-      // intents, etc.) bring down the whole server — users running
-      // `archon serve` for the web UI shouldn't lose it because of an
-      // unrelated bot misconfiguration. See #1365.
-      try {
-        await discord.start();
-        activePlatforms.push('Discord');
-      } catch (error) {
-        const err = error as Error;
-        const isPrivilegedIntentError = err.message?.includes('disallowed intents');
-        const hint = isPrivilegedIntentError
-          ? 'Enable "Message Content Intent" in the Discord Developer Portal ' +
-            '(your application > Bot > Privileged Gateway Intents) and restart, ' +
-            'or unset DISCORD_BOT_TOKEN if you do not want the Discord adapter.'
-          : 'Verify DISCORD_BOT_TOKEN is valid, or unset it to disable the Discord adapter.';
-        getLog().error({ err, hint }, 'discord.start_failed_continuing_without_adapter');
-        discord = null;
-      }
-    } else {
-      getLog().info('discord_adapter_skipped');
-    }
-
-    // Initialize Slack adapter (conditional)
-    if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
-      const slackStreamingMode = (process.env.SLACK_STREAMING_MODE ?? 'batch') as
-        | 'stream'
-        | 'batch';
-      slack = new SlackAdapter(
-        process.env.SLACK_BOT_TOKEN,
-        process.env.SLACK_APP_TOKEN,
-        slackStreamingMode
-      );
-      const slackAdapter = slack; // Capture for use in callback
-
-      // Register message handler
-      slackAdapter.onMessage(async event => {
-        const conversationId = slackAdapter.getConversationId(event);
-
-        // Skip if no text
-        if (!event.text) return;
-
-        // Strip the bot mention from the message
-        const content = slackAdapter.stripBotMention(event.text);
-        if (!content) return; // Message was only a mention with no content
-
-        // Check for thread context
-        let threadContext: string | undefined;
-        let parentConversationId: string | undefined;
-
-        if (slackAdapter.isThread(event)) {
-          // Fetch thread history for context (exclude current message)
-          const history = await slackAdapter.fetchThreadHistory(event);
-          if (history.length > 1) {
-            threadContext = history.slice(0, -1).join('\n');
-          }
-
-          // Get parent conversation ID for context inheritance
-          parentConversationId = slackAdapter.getParentConversationId(event) ?? undefined;
-        }
-
-        // Fire-and-forget: handler returns immediately, processing happens async
-        lockManager
-          .acquireLock(conversationId, async () => {
-            await handleMessage(slackAdapter, conversationId, content, {
-              threadContext,
-              parentConversationId,
-              isolationHints: { workflowType: 'thread', workflowId: conversationId },
-            });
-          })
-          .catch(createMessageErrorHandler('Slack', slackAdapter, conversationId));
-      });
-
-      await slack.start();
-      activePlatforms.push('Slack');
-    } else {
-      getLog().info('slack_adapter_skipped');
     }
   } else {
     getLog().info('platform_adapters_skipped');
@@ -503,60 +296,6 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
       }
     });
     getLog().info('github_webhook_registered');
-  }
-
-  // Gitea webhook endpoint
-  if (gitea) {
-    app.post('/webhooks/gitea', async c => {
-      const eventType = c.req.header('x-gitea-event');
-
-      try {
-        const signature = c.req.header('x-gitea-signature');
-        if (!signature) {
-          return c.json({ error: 'Missing signature header' }, 400);
-        }
-
-        // CRITICAL: Use c.req.text() for raw body (signature verification)
-        const payload = await c.req.text();
-
-        // Process async (fire-and-forget for fast webhook response)
-        gitea.handleWebhook(payload, signature).catch((error: unknown) => {
-          getLog().error({ err: error, eventType }, 'gitea_webhook_processing_error');
-        });
-
-        return c.text('OK', 200);
-      } catch (error) {
-        getLog().error({ err: error, eventType }, 'gitea_webhook_endpoint_error');
-        return c.json({ error: 'Internal server error' }, 500);
-      }
-    });
-    getLog().info('gitea_webhook_registered');
-  }
-
-  // GitLab webhook endpoint
-  if (gitlab) {
-    app.post('/webhooks/gitlab', async c => {
-      const eventType = c.req.header('x-gitlab-event');
-
-      try {
-        const token = c.req.header('x-gitlab-token');
-        if (!token) {
-          return c.json({ error: 'Missing token header' }, 400);
-        }
-
-        const payload = await c.req.text();
-
-        gitlab.handleWebhook(payload, token).catch((error: unknown) => {
-          getLog().error({ err: error, eventType }, 'gitlab.webhook_processing_error');
-        });
-
-        return c.text('OK', 200);
-      } catch (error) {
-        getLog().error({ err: error, eventType }, 'gitlab.webhook_endpoint_error');
-        return c.json({ error: 'Internal server error' }, 500);
-      }
-    });
-    getLog().info('gitlab_webhook_registered');
   }
 
   // Health check endpoints
@@ -607,37 +346,6 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
   });
   getLog().info({ port: server.port, hostname }, 'server_listening');
 
-  // Initialize Telegram adapter (conditional, skipped in CLI serve mode)
-  let telegram: TelegramAdapter | null = null;
-  if (!opts.skipPlatformAdapters && process.env.TELEGRAM_BOT_TOKEN) {
-    const streamingMode = (process.env.TELEGRAM_STREAMING_MODE ?? 'stream') as 'stream' | 'batch';
-    telegram = new TelegramAdapter(process.env.TELEGRAM_BOT_TOKEN, streamingMode);
-    const telegramAdapter = telegram; // Capture for use in callback
-
-    // Register message handler (auth is handled internally by adapter)
-    telegramAdapter.onMessage(async ({ conversationId, message }) => {
-      // Fire-and-forget: handler returns immediately, processing happens async
-      lockManager
-        .acquireLock(conversationId, async () => {
-          await handleMessage(telegramAdapter, conversationId, message, {
-            isolationHints: { workflowType: 'thread', workflowId: conversationId },
-          });
-        })
-        .catch(createMessageErrorHandler('Telegram', telegramAdapter, conversationId));
-    });
-
-    try {
-      await telegramAdapter.start();
-      activePlatforms.push('Telegram');
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      getLog().error({ err: error, errorType: error.constructor.name }, 'telegram.start_failed');
-      telegram = null; // Don't include in active platforms or shutdown
-    }
-  } else if (!opts.skipPlatformAdapters) {
-    getLog().info('telegram_adapter_skipped');
-  }
-
   // Graceful shutdown
   const shutdown = (): void => {
     getLog().info('server_shutting_down');
@@ -653,11 +361,6 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
       .then(async () => {
         // Stop adapters (these should not throw, but be defensive)
         try {
-          telegram?.stop();
-          discord?.stop();
-          slack?.stop();
-          gitea?.stop();
-          gitlab?.stop();
           await webAdapter.stop();
         } catch (error) {
           getLog().error({ err: error }, 'adapter_stop_error');

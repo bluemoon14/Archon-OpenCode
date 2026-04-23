@@ -78,15 +78,6 @@ export interface GlobalConfig {
   assistants?: AssistantDefaultsConfig;
 
   /**
-   * Platform streaming preferences (can be overridden per conversation)
-   */
-  streaming?: {
-    telegram?: 'stream' | 'batch';
-    discord?: 'stream' | 'batch';
-    slack?: 'stream' | 'batch';
-  };
-
-  /**
    * Directory preferences (usually not needed - defaults work well)
    */
   paths?: {
@@ -255,11 +246,6 @@ export interface MergedConfig {
   botName: string;
   assistant: string;
   assistants: AssistantDefaults;
-  streaming: {
-    telegram: 'stream' | 'batch';
-    discord: 'stream' | 'batch';
-    slack: 'stream' | 'batch';
-  };
   paths: {
     workspaces: string;
     worktrees: string;
@@ -308,11 +294,6 @@ export interface SafeConfig {
   botName: string;
   assistant: string;
   assistants: ProviderDefaultsMap;
-  streaming: {
-    telegram: 'stream' | 'batch';
-    discord: 'stream' | 'batch';
-    slack: 'stream' | 'batch';
-  };
   concurrency: {
     maxConversations: number;
   };

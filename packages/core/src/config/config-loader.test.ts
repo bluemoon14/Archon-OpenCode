@@ -40,9 +40,6 @@ describe('config-loader', () => {
   const originalEnv: Record<string, string | undefined> = {};
   const envVars = [
     'DEFAULT_AI_ASSISTANT',
-    'TELEGRAM_STREAMING_MODE',
-    'DISCORD_STREAMING_MODE',
-    'SLACK_STREAMING_MODE',
     'MAX_CONCURRENT_CONVERSATIONS',
     'WORKSPACE_PATH',
     'WORKTREE_BASE',
@@ -89,15 +86,12 @@ describe('config-loader', () => {
     test('parses valid YAML config', async () => {
       mockReadConfigFile.mockResolvedValue(`
 defaultAssistant: codex
-streaming:
-  telegram: batch
 concurrency:
   maxConversations: 5
 `);
 
       const config = await loadGlobalConfig();
       expect(config.defaultAssistant).toBe('codex');
-      expect(config.streaming?.telegram).toBe('batch');
       expect(config.concurrency?.maxConversations).toBe(5);
     });
 
@@ -229,24 +223,19 @@ concurrency:
       // explicitly rather than asserting an exhaustive shape.
       expect(config.assistants.claude).toEqual({});
       expect(config.assistants.codex).toEqual({});
-      expect(config.streaming.telegram).toBe('stream');
       expect(config.concurrency.maxConversations).toBe(10);
     });
 
     test('env vars override config files', async () => {
       mockReadConfigFile.mockResolvedValue(`
 defaultAssistant: claude
-streaming:
-  telegram: stream
 `);
 
       process.env.DEFAULT_AI_ASSISTANT = 'codex';
-      process.env.TELEGRAM_STREAMING_MODE = 'batch';
 
       const config = await loadConfig();
 
       expect(config.assistant).toBe('codex');
-      expect(config.streaming.telegram).toBe('batch');
     });
 
     test('throws on unknown DEFAULT_AI_ASSISTANT env var', async () => {
@@ -631,7 +620,6 @@ assistants:
       const safe = toSafeConfig(config);
       expect(typeof safe.botName).toBe('string');
       expect(safe.assistant).toBe('codex');
-      expect(safe.streaming).toBeDefined();
       expect(safe.concurrency).toBeDefined();
       expect(safe.defaults).toBeDefined();
       expect(safe.assistants).toBeDefined();

@@ -80,7 +80,7 @@ describe('setup command', () => {
         envPath,
         `
 CLAUDE_USE_GLOBAL_AUTH=true
-TELEGRAM_BOT_TOKEN=123:ABC
+GITHUB_TOKEN=ghp_test
 CODEX_ID_TOKEN=token1
 CODEX_ACCESS_TOKEN=token2
 CODEX_REFRESH_TOKEN=token3
@@ -96,10 +96,7 @@ CODEX_ACCOUNT_ID=account1
       expect(result).not.toBeNull();
       expect(result?.hasClaude).toBe(true);
       expect(result?.hasCodex).toBe(true);
-      expect(result?.platforms.telegram).toBe(true);
-      expect(result?.platforms.github).toBe(false);
-      expect(result?.platforms.slack).toBe(false);
-      expect(result?.platforms.discord).toBe(false);
+      expect(result?.platforms.github).toBe(true);
       expect(result?.hasDatabase).toBe(false);
 
       if (originalHome === undefined) {
@@ -144,9 +141,6 @@ CODEX_ACCOUNT_ID=account1
         },
         platforms: {
           github: false,
-          telegram: false,
-          slack: false,
-          discord: false,
         },
         botDisplayName: 'Archon',
       });
@@ -172,9 +166,6 @@ CODEX_ACCOUNT_ID=account1
         },
         platforms: {
           github: false,
-          telegram: false,
-          slack: false,
-          discord: false,
         },
         botDisplayName: 'Archon',
       });
@@ -194,7 +185,7 @@ CODEX_ACCOUNT_ID=account1
           codex: false,
           defaultAssistant: 'claude',
         },
-        platforms: { github: false, telegram: false, slack: false, discord: false },
+        platforms: { github: false },
         botDisplayName: 'Archon',
       });
 
@@ -212,7 +203,7 @@ CODEX_ACCOUNT_ID=account1
           codex: false,
           defaultAssistant: 'claude',
         },
-        platforms: { github: false, telegram: false, slack: false, discord: false },
+        platforms: { github: false },
         botDisplayName: 'Archon',
       });
 
@@ -230,19 +221,12 @@ CODEX_ACCOUNT_ID=account1
         },
         platforms: {
           github: true,
-          telegram: true,
-          slack: false,
-          discord: false,
         },
         github: {
           token: 'ghp_testtoken',
           webhookSecret: 'testsecret123',
           allowedUsers: 'user1,user2',
           botMention: 'mybot',
-        },
-        telegram: {
-          botToken: '123:ABC',
-          allowedUserIds: '111,222',
         },
         botDisplayName: 'Archon',
       });
@@ -252,9 +236,6 @@ CODEX_ACCOUNT_ID=account1
       expect(content).toContain('WEBHOOK_SECRET=testsecret123');
       expect(content).toContain('GITHUB_ALLOWED_USERS=user1,user2');
       expect(content).toContain('GITHUB_BOT_MENTION=mybot');
-      expect(content).toContain('TELEGRAM_BOT_TOKEN=123:ABC');
-      expect(content).toContain('TELEGRAM_ALLOWED_USER_IDS=111,222');
-      expect(content).toContain('TELEGRAM_STREAMING_MODE=stream');
     });
 
     it('should include Codex tokens when configured', () => {
@@ -273,9 +254,6 @@ CODEX_ACCOUNT_ID=account1
         },
         platforms: {
           github: false,
-          telegram: false,
-          slack: false,
-          discord: false,
         },
         botDisplayName: 'Archon',
       });
@@ -298,9 +276,6 @@ CODEX_ACCOUNT_ID=account1
         },
         platforms: {
           github: false,
-          telegram: false,
-          slack: false,
-          discord: false,
         },
         botDisplayName: 'MyCustomBot',
       });
@@ -319,70 +294,11 @@ CODEX_ACCOUNT_ID=account1
         },
         platforms: {
           github: false,
-          telegram: false,
-          slack: false,
-          discord: false,
         },
         botDisplayName: 'Archon',
       });
 
       expect(content).not.toContain('BOT_DISPLAY_NAME=');
-    });
-
-    it('should include Slack configuration', () => {
-      const content = generateEnvContent({
-        database: { type: 'sqlite' },
-        ai: {
-          claude: true,
-          claudeAuthType: 'global',
-          codex: false,
-          defaultAssistant: 'claude',
-        },
-        platforms: {
-          github: false,
-          telegram: false,
-          slack: true,
-          discord: false,
-        },
-        slack: {
-          botToken: 'xoxb-test',
-          appToken: 'xapp-test',
-          allowedUserIds: 'U123',
-        },
-        botDisplayName: 'Archon',
-      });
-
-      expect(content).toContain('SLACK_BOT_TOKEN=xoxb-test');
-      expect(content).toContain('SLACK_APP_TOKEN=xapp-test');
-      expect(content).toContain('SLACK_ALLOWED_USER_IDS=U123');
-      expect(content).toContain('SLACK_STREAMING_MODE=batch');
-    });
-
-    it('should include Discord configuration', () => {
-      const content = generateEnvContent({
-        database: { type: 'sqlite' },
-        ai: {
-          claude: true,
-          claudeAuthType: 'global',
-          codex: false,
-          defaultAssistant: 'claude',
-        },
-        platforms: {
-          github: false,
-          telegram: false,
-          slack: false,
-          discord: true,
-        },
-        discord: {
-          botToken: 'discord-bot-token-test',
-          allowedUserIds: '123456789',
-        },
-        botDisplayName: 'Archon',
-      });
-
-      expect(content).toContain('DISCORD_BOT_TOKEN=discord-bot-token-test');
-      expect(content).toContain('DISCORD_ALLOWED_USER_IDS=123456789');
-      expect(content).toContain('DISCORD_STREAMING_MODE=batch');
     });
   });
 
@@ -619,18 +535,15 @@ describe('writeScopedEnv (#1303)', () => {
 
   it('merge preserves existing bot tokens', () => {
     const envPath = join(HOME_DIR, '.env');
-    writeFileSync(
-      envPath,
-      'SLACK_BOT_TOKEN=xoxb-existing\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-existing\n'
-    );
+    writeFileSync(envPath, 'GITHUB_TOKEN=ghp-existing\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-existing\n');
     // Proposed content has these keys with different/empty values
-    writeScopedEnv('SLACK_BOT_TOKEN=xoxb-new-placeholder\nCLAUDE_CODE_OAUTH_TOKEN=\n', {
+    writeScopedEnv('GITHUB_TOKEN=ghp-new-placeholder\nCLAUDE_CODE_OAUTH_TOKEN=\n', {
       scope: 'home',
       repoPath: REPO_DIR,
       force: false,
     });
     const merged = parseDotenv(readFileSync(join(HOME_DIR, '.env'), 'utf-8'));
-    expect(merged.SLACK_BOT_TOKEN).toBe('xoxb-existing');
+    expect(merged.GITHUB_TOKEN).toBe('ghp-existing');
     expect(merged.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-existing');
   });
 

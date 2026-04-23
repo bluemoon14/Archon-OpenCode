@@ -34,7 +34,7 @@ Archon fixes this. Encode your development process as a workflow. The workflow d
 - **Isolated** - Every workflow run gets its own git worktree. Run 5 fixes in parallel with no conflicts.
 - **Fire and forget** - Kick off a workflow, go do other work. Come back to a finished PR with review comments.
 - **Composable** - Mix deterministic nodes (bash scripts, tests, git ops) with AI nodes (planning, code generation, review). The AI only runs where it adds value.
-- **Portable** - Define workflows once in `.archon/workflows/`, commit them to your repo. They work the same from CLI, Web UI, Slack, Telegram, or GitHub.
+- **Portable** - Define workflows once in `.archon/workflows/`, commit them to your repo. They work the same from CLI, Web UI, or GitHub.
 
 ## What It Looks Like
 
@@ -220,7 +220,7 @@ Register a project by clicking **+** next to "Project" in the chat sidebar - ent
 - **Workflow Builder** - Visual drag-and-drop editor for creating DAG workflows with loop nodes
 - **Workflow Execution** - Step-by-step progress view for any running or completed workflow
 
-**Monitoring hub:** The sidebar shows conversations from **all platforms** - not just the web. Workflows kicked off from the CLI, messages from Slack or Telegram, GitHub issue interactions - everything appears in one place.
+**Monitoring hub:** The sidebar shows conversations from **all platforms** - not just the web. Workflows kicked off from the CLI and GitHub issue interactions all appear in one place.
 
 See the [Web UI Guide](https://archon.diy/adapters/web/) for full documentation.
 
@@ -256,21 +256,17 @@ See [Authoring Workflows](https://archon.diy/guides/authoring-workflows/) and [A
 
 ## Add a Platform
 
-The Web UI and CLI work out of the box. Optionally connect a chat platform for remote access:
+The Web UI and CLI work out of the box. Optionally connect GitHub for remote access:
 
 | Platform | Setup time | Guide |
 |----------|-----------|-------|
-| **Telegram** | 5 min | [Telegram Guide](https://archon.diy/adapters/telegram/) |
-| **Slack** | 15 min | [Slack Guide](https://archon.diy/adapters/slack/) |
 | **GitHub Webhooks** | 15 min | [GitHub Guide](https://archon.diy/adapters/github/) |
-| **Discord** | 5 min | [Discord Guide](https://archon.diy/adapters/community/discord/) |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Platform Adapters (Web UI, CLI, Telegram, Slack,       │
-│                    Discord, GitHub)                     │
+│         Platform Adapters (Web UI, CLI, GitHub)         │
 └──────────────────────────┬──────────────────────────────┘
                            │
                            ▼

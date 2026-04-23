@@ -88,36 +88,11 @@ echo "--------------------"
 
 PLATFORMS=0
 
-if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
-  check_pass "Telegram configured"
-  ((PLATFORMS++))
-else
-  check_warn "Telegram not configured"
-fi
-
-if [ -n "$DISCORD_BOT_TOKEN" ]; then
-  check_pass "Discord configured"
-  ((PLATFORMS++))
-else
-  check_warn "Discord not configured"
-fi
-
-if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_APP_TOKEN" ]; then
-  check_pass "Slack configured"
-  ((PLATFORMS++))
-else
-  check_warn "Slack not configured"
-fi
-
 if [ -n "$GITHUB_TOKEN" ] && [ -n "$WEBHOOK_SECRET" ]; then
   check_pass "GitHub webhooks configured"
   ((PLATFORMS++))
 else
   check_warn "GitHub webhooks not configured"
-fi
-
-if [ $PLATFORMS -eq 0 ]; then
-  check_fail "No platform adapters configured (need at least one)"
 fi
 
 # Docker

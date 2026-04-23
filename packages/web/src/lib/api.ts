@@ -86,11 +86,6 @@ export interface SafeConfigResponse {
   botName: string;
   assistant: string;
   assistants: Record<string, ProviderDefaults>;
-  streaming: {
-    telegram: 'stream' | 'batch';
-    discord: 'stream' | 'batch';
-    slack: 'stream' | 'batch';
-  };
   concurrency: {
     maxConversations: number;
   };

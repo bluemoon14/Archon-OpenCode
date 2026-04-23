@@ -4,7 +4,7 @@
  * Guides users through configuring:
  * - Database (SQLite default vs PostgreSQL)
  * - AI assistants (Claude and/or Codex)
- * - Platform connections (GitHub, Telegram, Slack, Discord)
+ * - Platform connections (GitHub)
  *
  * Writes configuration to one archon-owned env file, chosen by --scope:
  *   - 'home'    (default)  → ~/.archon/.env
@@ -68,14 +68,8 @@ interface SetupConfig {
   };
   platforms: {
     github: boolean;
-    telegram: boolean;
-    slack: boolean;
-    discord: boolean;
   };
   github?: GitHubConfig;
-  telegram?: TelegramConfig;
-  slack?: SlackConfig;
-  discord?: DiscordConfig;
   botDisplayName: string;
 }
 
@@ -84,22 +78,6 @@ interface GitHubConfig {
   webhookSecret: string;
   allowedUsers: string;
   botMention?: string;
-}
-
-interface TelegramConfig {
-  botToken: string;
-  allowedUserIds: string;
-}
-
-interface SlackConfig {
-  botToken: string;
-  appToken: string;
-  allowedUserIds: string;
-}
-
-interface DiscordConfig {
-  botToken: string;
-  allowedUserIds: string;
 }
 
 interface CodexTokens {
@@ -115,9 +93,6 @@ interface ExistingConfig {
   hasCodex: boolean;
   platforms: {
     github: boolean;
-    telegram: boolean;
-    slack: boolean;
-    discord: boolean;
   };
 }
 
@@ -355,9 +330,6 @@ export function checkExistingConfig(envPath?: string): ExistingConfig | null {
       hasEnvValue(content, 'CODEX_ACCOUNT_ID'),
     platforms: {
       github: hasEnvValue(content, 'GITHUB_TOKEN') || hasEnvValue(content, 'GH_TOKEN'),
-      telegram: hasEnvValue(content, 'TELEGRAM_BOT_TOKEN'),
-      slack: hasEnvValue(content, 'SLACK_BOT_TOKEN') && hasEnvValue(content, 'SLACK_APP_TOKEN'),
-      discord: hasEnvValue(content, 'DISCORD_BOT_TOKEN'),
     },
   };
 }
@@ -885,12 +857,7 @@ After upgrading, run 'archon setup' again.`,
 async function collectPlatforms(): Promise<SetupConfig['platforms']> {
   const platforms = await multiselect({
     message: 'Which platforms do you want to connect? (↑↓ navigate, space select, enter confirm)',
-    options: [
-      { value: 'github', label: 'GitHub', hint: 'Respond to issues/PRs via webhooks' },
-      { value: 'telegram', label: 'Telegram', hint: 'Chat bot via BotFather' },
-      { value: 'slack', label: 'Slack', hint: 'Workspace app with Socket Mode' },
-      { value: 'discord', label: 'Discord', hint: 'Server bot' },
-    ],
+    options: [{ value: 'github', label: 'GitHub', hint: 'Respond to issues/PRs via webhooks' }],
     required: false,
   });
 
@@ -901,9 +868,6 @@ async function collectPlatforms(): Promise<SetupConfig['platforms']> {
 
   return {
     github: platforms.includes('github'),
-    telegram: platforms.includes('telegram'),
-    slack: platforms.includes('slack'),
-    discord: platforms.includes('discord'),
   };
 }
 
@@ -987,178 +951,6 @@ async function collectGitHubConfig(): Promise<GitHubConfig> {
     webhookSecret,
     allowedUsers: allowedUsers || '',
     botMention,
-  };
-}
-
-/**
- * Collect Telegram credentials
- */
-async function collectTelegramConfig(): Promise<TelegramConfig> {
-  note(
-    'Telegram Bot Setup\n\n' +
-      'Step 1: Create your bot\n' +
-      '1. Open Telegram and search for @BotFather\n' +
-      '2. Send /newbot\n' +
-      '3. Choose a display name (e.g., "My Archon Bot")\n' +
-      '4. Choose a username (must end in "bot")\n' +
-      '5. Copy the token BotFather gives you\n\n' +
-      'Step 2: Get your user ID\n' +
-      '1. Search for @userinfobot on Telegram\n' +
-      '2. Send any message\n' +
-      '3. It will reply with your user ID (a number)',
-    'Telegram Setup'
-  );
-
-  const botToken = await password({
-    message: 'Enter your Telegram Bot Token:',
-    validate: value => {
-      if (!value?.includes(':')) {
-        return 'Please enter a valid bot token (format: 123456:ABC...)';
-      }
-      return undefined;
-    },
-  });
-
-  if (isCancel(botToken)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  const allowedUserIds = await text({
-    message: 'Enter allowed Telegram user IDs (comma-separated, or leave empty for all):',
-    placeholder: '123456789,987654321',
-  });
-
-  if (isCancel(allowedUserIds)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  return {
-    botToken,
-    allowedUserIds: allowedUserIds || '',
-  };
-}
-
-/**
- * Collect Slack credentials
- */
-async function collectSlackConfig(): Promise<SlackConfig> {
-  note(
-    'Slack App Setup\n\n' +
-      'Slack setup requires creating an app at api.slack.com/apps\n\n' +
-      '1. Create a new app "From scratch"\n' +
-      '2. Enable Socket Mode:\n' +
-      '   - Settings -> Socket Mode -> Enable\n' +
-      '   - Generate an App-Level Token (xapp-...)\n' +
-      '3. Add Bot Token Scopes (OAuth & Permissions):\n' +
-      '   - app_mentions:read, chat:write, channels:history\n' +
-      '   - channels:join, im:history, im:write, im:read\n' +
-      '4. Subscribe to Bot Events (Event Subscriptions):\n' +
-      '   - app_mention, message.im\n' +
-      '5. Install to Workspace\n' +
-      '   - Copy the Bot User OAuth Token (xoxb-...)\n' +
-      '6. Invite bot to your channel: /invite @YourBotName\n\n' +
-      'Get your user ID: Click profile -> ... -> Copy member ID',
-    'Slack Setup'
-  );
-
-  const botToken = await password({
-    message: 'Enter your Slack Bot Token (xoxb-...):',
-    validate: value => {
-      if (!value?.startsWith('xoxb-')) {
-        return 'Please enter a valid bot token (starts with xoxb-)';
-      }
-      return undefined;
-    },
-  });
-
-  if (isCancel(botToken)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  const appToken = await password({
-    message: 'Enter your Slack App Token (xapp-...):',
-    validate: value => {
-      if (!value?.startsWith('xapp-')) {
-        return 'Please enter a valid app token (starts with xapp-)';
-      }
-      return undefined;
-    },
-  });
-
-  if (isCancel(appToken)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  const allowedUserIds = await text({
-    message: 'Enter allowed Slack user IDs (comma-separated, or leave empty for all):',
-    placeholder: 'U12345678,U87654321',
-  });
-
-  if (isCancel(allowedUserIds)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  return {
-    botToken,
-    appToken,
-    allowedUserIds: allowedUserIds || '',
-  };
-}
-
-/**
- * Collect Discord credentials
- */
-async function collectDiscordConfig(): Promise<DiscordConfig> {
-  note(
-    'Discord Bot Setup\n\n' +
-      '1. Go to discord.com/developers/applications\n' +
-      '2. Click "New Application" and name it\n' +
-      '3. Go to "Bot" in sidebar:\n' +
-      '   - Click "Reset Token" and copy it\n' +
-      '   - Enable "MESSAGE CONTENT INTENT"\n' +
-      '4. Go to "OAuth2" -> "URL Generator":\n' +
-      '   - Select scope: bot\n' +
-      '   - Select permissions: Send Messages, Read Message History\n' +
-      '   - Open generated URL to add bot to your server\n\n' +
-      'Get your user ID:\n' +
-      '- Discord Settings -> Advanced -> Enable Developer Mode\n' +
-      '- Right-click yourself -> Copy User ID',
-    'Discord Setup'
-  );
-
-  const botToken = await password({
-    message: 'Enter your Discord Bot Token:',
-    validate: value => {
-      if (!value || value.length < 50) {
-        return 'Please enter a valid Discord bot token';
-      }
-      return undefined;
-    },
-  });
-
-  if (isCancel(botToken)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  const allowedUserIds = await text({
-    message: 'Enter allowed Discord user IDs (comma-separated, or leave empty for all):',
-    placeholder: '123456789012345678,987654321098765432',
-  });
-
-  if (isCancel(allowedUserIds)) {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  return {
-    botToken,
-    allowedUserIds: allowedUserIds || '',
   };
 }
 
@@ -1267,40 +1059,6 @@ export function generateEnvContent(config: SetupConfig): string {
     if (config.github.botMention) {
       lines.push(`GITHUB_BOT_MENTION=${config.github.botMention}`);
     }
-    lines.push('');
-  }
-
-  // Telegram
-  if (config.platforms.telegram && config.telegram) {
-    lines.push('# Telegram');
-    lines.push(`TELEGRAM_BOT_TOKEN=${config.telegram.botToken}`);
-    if (config.telegram.allowedUserIds) {
-      lines.push(`TELEGRAM_ALLOWED_USER_IDS=${config.telegram.allowedUserIds}`);
-    }
-    lines.push('TELEGRAM_STREAMING_MODE=stream');
-    lines.push('');
-  }
-
-  // Slack
-  if (config.platforms.slack && config.slack) {
-    lines.push('# Slack');
-    lines.push(`SLACK_BOT_TOKEN=${config.slack.botToken}`);
-    lines.push(`SLACK_APP_TOKEN=${config.slack.appToken}`);
-    if (config.slack.allowedUserIds) {
-      lines.push(`SLACK_ALLOWED_USER_IDS=${config.slack.allowedUserIds}`);
-    }
-    lines.push('SLACK_STREAMING_MODE=batch');
-    lines.push('');
-  }
-
-  // Discord
-  if (config.platforms.discord && config.discord) {
-    lines.push('# Discord');
-    lines.push(`DISCORD_BOT_TOKEN=${config.discord.botToken}`);
-    if (config.discord.allowedUserIds) {
-      lines.push(`DISCORD_ALLOWED_USER_IDS=${config.discord.allowedUserIds}`);
-    }
-    lines.push('DISCORD_STREAMING_MODE=batch');
     lines.push('');
   }
 
@@ -1663,9 +1421,6 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
   if (existing) {
     const configuredPlatforms: string[] = [];
     if (existing.platforms.github) configuredPlatforms.push('GitHub');
-    if (existing.platforms.telegram) configuredPlatforms.push('Telegram');
-    if (existing.platforms.slack) configuredPlatforms.push('Slack');
-    if (existing.platforms.discord) configuredPlatforms.push('Discord');
 
     const summary = [
       `Database: ${existing.hasDatabase ? 'PostgreSQL' : 'SQLite'}`,
@@ -1712,9 +1467,6 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
       },
       platforms: {
         github: existing?.platforms.github ?? false,
-        telegram: existing?.platforms.telegram ?? false,
-        slack: existing?.platforms.slack ?? false,
-        discord: existing?.platforms.discord ?? false,
       },
       botDisplayName: 'Archon',
     };
@@ -1728,23 +1480,11 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
     // Merge with existing
     config.platforms = {
       github: config.platforms.github || newPlatforms.github,
-      telegram: config.platforms.telegram || newPlatforms.telegram,
-      slack: config.platforms.slack || newPlatforms.slack,
-      discord: config.platforms.discord || newPlatforms.discord,
     };
 
     // Collect credentials for new platforms only
     if (newPlatforms.github && !existing?.platforms.github) {
       config.github = await collectGitHubConfig();
-    }
-    if (newPlatforms.telegram && !existing?.platforms.telegram) {
-      config.telegram = await collectTelegramConfig();
-    }
-    if (newPlatforms.slack && !existing?.platforms.slack) {
-      config.slack = await collectSlackConfig();
-    }
-    if (newPlatforms.discord && !existing?.platforms.discord) {
-      config.discord = await collectDiscordConfig();
     }
   } else {
     // Fresh or update mode - collect everything
@@ -1762,15 +1502,6 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
     // Collect platform credentials
     if (platforms.github) {
       config.github = await collectGitHubConfig();
-    }
-    if (platforms.telegram) {
-      config.telegram = await collectTelegramConfig();
-    }
-    if (platforms.slack) {
-      config.slack = await collectSlackConfig();
-    }
-    if (platforms.discord) {
-      config.discord = await collectDiscordConfig();
     }
 
     // Collect bot display name
@@ -1888,9 +1619,6 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
   // Summary
   const configuredPlatforms: string[] = [];
   if (config.platforms.github) configuredPlatforms.push('GitHub');
-  if (config.platforms.telegram) configuredPlatforms.push('Telegram');
-  if (config.platforms.slack) configuredPlatforms.push('Slack');
-  if (config.platforms.discord) configuredPlatforms.push('Discord');
 
   const aiConfigured: string[] = [];
   if (config.ai.claude) {

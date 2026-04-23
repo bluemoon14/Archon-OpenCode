@@ -162,12 +162,6 @@ const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
 #     additionalDirectories:
 #       - /absolute/path/to/other/repo
 
-# Streaming mode per platform (stream or batch)
-# streaming:
-#   telegram: stream
-#   discord: batch
-#   slack: batch
-
 # Concurrency settings
 # concurrency:
 #   maxConversations: 10
@@ -279,11 +273,6 @@ function getDefaults(): MergedConfig {
     botName: 'Archon',
     assistant: providers.find(p => p.builtIn)?.id ?? 'claude',
     assistants: registeredAssistants,
-    streaming: {
-      telegram: 'stream',
-      discord: 'batch',
-      slack: 'batch',
-    },
     paths: {
       workspaces: getArchonWorkspacesPath(),
       worktrees: getArchonWorktreesPath(),
@@ -324,23 +313,6 @@ function applyEnvOverrides(config: MergedConfig): MergedConfig {
           `Available providers: ${getRegisteredProviderNames().join(', ')}`
       );
     }
-  }
-
-  // Streaming overrides
-  const streamingModes = ['stream', 'batch'] as const;
-  const telegramMode = process.env.TELEGRAM_STREAMING_MODE;
-  if (telegramMode && streamingModes.includes(telegramMode as 'stream' | 'batch')) {
-    config.streaming.telegram = telegramMode as 'stream' | 'batch';
-  }
-
-  const discordMode = process.env.DISCORD_STREAMING_MODE;
-  if (discordMode && streamingModes.includes(discordMode as 'stream' | 'batch')) {
-    config.streaming.discord = discordMode as 'stream' | 'batch';
-  }
-
-  const slackMode = process.env.SLACK_STREAMING_MODE;
-  if (slackMode && streamingModes.includes(slackMode as 'stream' | 'batch')) {
-    config.streaming.slack = slackMode as 'stream' | 'batch';
   }
 
   // Path overrides (these come from archon-paths.ts which already checks env vars)
@@ -385,13 +357,6 @@ function mergeGlobalConfig(defaults: MergedConfig, global: GlobalConfig): Merged
   }
 
   result.assistants = mergeAssistantDefaults(result.assistants, global.assistants);
-
-  // Streaming preferences
-  if (global.streaming) {
-    if (global.streaming.telegram) result.streaming.telegram = global.streaming.telegram;
-    if (global.streaming.discord) result.streaming.discord = global.streaming.discord;
-    if (global.streaming.slack) result.streaming.slack = global.streaming.slack;
-  }
 
   // Path preferences
   if (global.paths) {
@@ -516,7 +481,6 @@ export function logConfig(config: MergedConfig): void {
   getLog().info(
     {
       assistant: config.assistant,
-      streaming: config.streaming,
     },
     'config_loaded'
   );
@@ -545,10 +509,6 @@ export async function updateGlobalConfig(updates: Partial<GlobalConfig>): Promis
         mergeAssistantDefaults(getDefaults().assistants, current.assistants),
         updates.assistants
       );
-    }
-
-    if (updates.streaming) {
-      merged.streaming = { ...current.streaming, ...updates.streaming };
     }
 
     if (updates.concurrency) {
@@ -586,11 +546,6 @@ export function toSafeConfig(config: MergedConfig): SafeConfig {
     botName: config.botName,
     assistant: config.assistant,
     assistants: toSafeAssistantDefaults(config.assistants),
-    streaming: {
-      telegram: config.streaming.telegram,
-      discord: config.streaming.discord,
-      slack: config.streaming.slack,
-    },
     concurrency: { maxConversations: config.concurrency.maxConversations },
     defaults: {
       copyDefaults: config.defaults.copyDefaults,
