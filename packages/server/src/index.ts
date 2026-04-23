@@ -75,12 +75,7 @@ import {
   getPort,
 } from '@archon/core';
 import type { IPlatformAdapter } from '@archon/core';
-import {
-  createLogger,
-  logArchonPaths,
-  validateAppDefaultsPaths,
-  shutdownTelemetry,
-} from '@archon/paths';
+import { createLogger, logArchonPaths, validateAppDefaultsPaths } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -667,9 +662,6 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
         } catch (error) {
           getLog().error({ err: error }, 'adapter_stop_error');
         }
-
-        // Flush queued telemetry events before pool closes the process.
-        await shutdownTelemetry();
 
         return pool.end();
       })
