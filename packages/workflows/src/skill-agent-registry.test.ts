@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSkillAgentRegistry, readModelsFiles } from './skill-agent-registry';
+import { createSkillAgentRegistry } from './skill-agent-registry';
 
 let repoRoot: string;
 let userArchonDir: string;
@@ -139,19 +139,21 @@ describe('modelsFiles', () => {
     expect(project).toBeUndefined();
   });
 
-  test('invalid models.yaml throws a clear error', () => {
-    writeModels(join(userArchonDir, 'models.yaml'), `version: 1\nskills: "not a record"\n`);
+  test('invalid models.yaml throws a clear error that includes the full file path', () => {
+    const badPath = join(userArchonDir, 'models.yaml');
+    writeModels(badPath, `version: 1\nskills: "not a record"\n`);
     const reg = createSkillAgentRegistry({ repoRoot, userArchonDir });
-    expect(() => reg.modelsFiles()).toThrow(/Invalid models.yaml/);
-  });
-});
-
-describe('readModelsFiles (async variant)', () => {
-  test('returns the same three tiers as the sync factory', async () => {
-    writeModels(join(userArchonDir, 'models.yaml'), `version: 1\nskills:\n  foo: openai/gpt-4o\n`);
-    const out = await readModelsFiles({ repoRoot, userArchonDir });
-    expect(out.bundled?.version).toBe(1);
-    expect(out.global?.skills?.foo).toBe('openai/gpt-4o');
-    expect(out.project).toBeUndefined();
+    // Error must include the FULL path so users know which file to fix,
+    // not just a scope label like 'global' or 'project'.
+    try {
+      reg.modelsFiles();
+      throw new Error('expected modelsFiles to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      const msg = (err as Error).message;
+      expect(msg).toContain('Invalid models.yaml');
+      expect(msg).toContain(badPath);
+      expect(msg).toContain('skills');
+    }
   });
 });

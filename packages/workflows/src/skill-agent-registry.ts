@@ -103,22 +103,6 @@ export function createSkillAgentRegistry(locations: RegistryLocations = {}): Ski
 }
 
 /**
- * Async variant of `modelsFiles()` — performs one-shot I/O and returns the
- * three tiers together. Exposed for callers (CLI, MCP) that prefer a single
- * Promise over the lazy sync factory. Same parsing semantics.
- */
-export async function readModelsFiles(
-  locations: RegistryLocations = {}
-): Promise<{ bundled?: ModelsFile; global?: ModelsFile; project?: ModelsFile }> {
-  const repoRoot = locations.repoRoot ?? process.cwd();
-  const userArchonDir = locations.userArchonDir ?? join(homedir(), '.archon');
-  const bundled = parseModelsYamlText(BUNDLED_MODELS_YAML, 'bundled');
-  const global = await loadModelsFileAsync(join(userArchonDir, 'models.yaml'));
-  const project = await loadModelsFileAsync(join(repoRoot, '.archon', 'models.yaml'));
-  return { bundled, global, project };
-}
-
-/**
  * Resolve the models.yaml path for a given scope.
  * - `'project'` → `<repoRoot>/.archon/models.yaml`
  * - `'global'`  → `~/.archon/models.yaml` (or `<userArchonDir>/models.yaml`)
