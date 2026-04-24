@@ -102,6 +102,55 @@ body`
     const out = await loadSkill('fancy-skill', { projectDir });
     expect(out.model).toBe('anthropic/claude-opus-4-5');
   });
+
+  test('parses optional tags/requires/examples fields', async () => {
+    const projectDir = join(tmpRoot, 'proj');
+    await writeSkill(
+      projectDir,
+      'rich-skill',
+      `---
+name: rich-skill
+description: demo
+tags: [testing, scaffolding]
+requires: [brainstorming]
+examples:
+  - Use when starting a new feature
+  - Use when ripping out dead code
+---
+body`
+    );
+    const out = await loadSkill('rich-skill', { projectDir });
+    expect(out.tags).toEqual(['testing', 'scaffolding']);
+    expect(out.requires).toEqual(['brainstorming']);
+    expect(out.examples).toEqual([
+      'Use when starting a new feature',
+      'Use when ripping out dead code',
+    ]);
+  });
+
+  test('skill without new optional fields still parses (back-compat)', async () => {
+    const projectDir = join(tmpRoot, 'proj');
+    await writeSkill(projectDir, 'plain-skill', SAMPLE('plain-skill'));
+    const out = await loadSkill('plain-skill', { projectDir });
+    expect(out.tags).toBeUndefined();
+    expect(out.requires).toBeUndefined();
+    expect(out.examples).toBeUndefined();
+  });
+
+  test('rejects non-kebab-case requires entries', async () => {
+    const projectDir = join(tmpRoot, 'proj');
+    await writeSkill(
+      projectDir,
+      'bad-requires',
+      `---
+name: bad-requires
+description: x
+requires: [UpperCase]
+---
+body`
+    );
+    await expect(loadSkill('bad-requires', { projectDir })).rejects.toThrow();
+  });
 });
 
 describe('listSkills', () => {
