@@ -1,6 +1,8 @@
 ## Project Overview
 
-**Archon — Remote Agentic Coding CLI**: Drive AI coding assistants (Claude Code SDK, with OpenCode + Pydantic AI planned) from the command line. Built with **Bun + TypeScript + SQLite**. Single-developer tool, no server, no multi-tenancy.
+**Archon — Remote Agentic Coding CLI**: Drive AI coding assistants (Claude Code SDK, OpenCode, Pydantic AI, and LiteLLM) from the command line. Built with **Bun + TypeScript + SQLite**. Single-developer tool, no server, no multi-tenancy.
+
+Ships with the **obra/superpowers** skills + agents library vendored into bundled defaults — 14 skills (brainstorming, systematic-debugging, test-driven-development, writing-plans, writing-skills, etc.) plus the `code-reviewer` agent, available out of the box on every runtime. Per-skill / per-agent model selection via a central `models.yaml` manifest.
 
 ## Engineering Principles
 
@@ -169,7 +171,27 @@ The CLI implements a single `IPlatformAdapter` (`packages/cli/src/adapters/cli-a
 
 ### AI Providers
 
-Implement `IAgentProvider`. Providers receive raw `nodeConfig` + `assistantConfig` and translate to SDK-specific options internally. See `packages/providers/src/`.
+Four built-ins, all implementing `IAgentProvider`. Providers receive raw `nodeConfig` + `assistantConfig` and translate to SDK-specific options internally. See `packages/providers/src/`.
+
+| Provider | How it routes | Accepted model shapes |
+|---|---|---|
+| `claude` | Claude Code SDK direct | `sonnet`, `opus`, `haiku`, `claude-*`, `inherit` |
+| `opencode` | Spawns `opencode serve` subprocess | `opencode/*`, any `<id>/<model>` not claimed by litellm |
+| `pydantic` | JSONL stdio bridge to user Python agent | explicit `provider: pydantic` + `agent: <name>` (no model routing) |
+| `litellm` | OpenAI-compatible HTTP proxy (spawned) | `anthropic/*`, `openai/*`, `azure/*`, `azure_ai/*`, `novita/*` |
+
+Claude SDK wins `anthropic/*` by default (registered first in the provider registry). Users force LiteLLM routing with explicit `provider: litellm` on the node.
+
+### Skills + Agents
+
+Vendored superpowers library — 14 skills + 1 agent bundled into the binary at `packages/workflows/src/defaults/bundled-defaults.generated.ts` (source: `.archon/{skills,agents}/defaults/`). Users can override per-repo (`.archon/skills/<name>/SKILL.md`, `.archon/agents/<name>.md`) or globally (`~/.archon/...`) — 3-tier merge with project > global > bundled.
+
+Per-skill / per-agent model selection via `models.yaml`:
+- Bundled defaults: `.archon/models.defaults.yaml` (assigns haiku/sonnet/opus per skill + `fast`/`balanced`/`smart` aliases).
+- User-editable: `~/.archon/models.yaml` (global) or `.archon/models.yaml` (project).
+- 8-tier resolver (see `packages/workflows/src/model-resolution.ts`): override > project > global > bundled > frontmatter > category-default > owner-node > defaultAssistant.
+
+CLI: `archon skills list|show <name>`, `archon agents list|show <name>`, `archon models list`.
 
 ### Slash Commands
 
