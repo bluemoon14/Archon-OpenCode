@@ -153,6 +153,8 @@ function parseAgentContent(
     model: fm.model,
     tools: fm.tools,
     maxTurns: fm.maxTurns,
+    tags: fm.tags,
+    examples: fm.examples,
     body: body.trimStart(),
     source,
     path,

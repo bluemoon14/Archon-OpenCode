@@ -87,6 +87,33 @@ body`
     expect(out.model).toBe('anthropic/claude-opus-4-5');
   });
 
+  test('parses optional tags + examples fields', async () => {
+    const projectDir = join(tmpRoot, 'proj');
+    await writeAgent(
+      projectDir,
+      'rich-agent',
+      `---
+name: rich-agent
+description: demo
+tags: [review, docs]
+examples:
+  - Use when reviewing a PR
+---
+body`
+    );
+    const out = await loadAgent('rich-agent', { projectDir });
+    expect(out.tags).toEqual(['review', 'docs']);
+    expect(out.examples).toEqual(['Use when reviewing a PR']);
+  });
+
+  test('agent without new optional fields still parses (back-compat)', async () => {
+    const projectDir = join(tmpRoot, 'proj');
+    await writeAgent(projectDir, 'plain', SAMPLE('plain'));
+    const out = await loadAgent('plain', { projectDir });
+    expect(out.tags).toBeUndefined();
+    expect(out.examples).toBeUndefined();
+  });
+
   test('throws on missing frontmatter', async () => {
     const projectDir = join(tmpRoot, 'proj');
     await writeAgent(projectDir, 'bare', 'no frontmatter');

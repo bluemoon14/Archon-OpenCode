@@ -12,12 +12,17 @@
 #   make opencode           # install/update OpenCode only
 #   make pydantic           # install/update uv only
 #
+#   make bootstrap          # install + Claude + archon setup (most common one-shot flow)
+#   make bootstrap-claude   # alias for `bootstrap`
+#   make bootstrap-opencode # install + OpenCode + archon setup
+#   make bootstrap-pydantic # install + uv + archon setup
+#
 #   make validate           # run the full validate suite (type-check, lint, tests)
 #
 # Every target is idempotent — re-running updates in place. Runtime installers
 # (Anthropic's, OpenCode's, Astral's) handle both fresh installs and upgrades.
 
-.PHONY: help install claude opencode pydantic validate check-bun check-curl
+.PHONY: help install claude opencode pydantic setup bootstrap bootstrap-claude bootstrap-opencode bootstrap-pydantic validate check-bun check-curl
 
 .DEFAULT_GOAL := help
 
@@ -25,16 +30,20 @@ help:
 	@echo 'Archon — developer setup'
 	@echo ''
 	@echo 'Targets:'
-	@echo '  make install           Install Bun deps and link the `archon` CLI globally.'
-	@echo '  make install claude    Above, then install or update Claude Code.'
-	@echo '  make install opencode  Above, then install or update OpenCode.'
-	@echo '  make install pydantic  Above, then install or update uv (for BYO Pydantic AI agents).'
+	@echo '  make install             Install Bun deps and link the `archon` CLI globally.'
+	@echo '  make install claude      Above, then install or update Claude Code.'
+	@echo '  make install opencode    Above, then install or update OpenCode.'
+	@echo '  make install pydantic    Above, then install or update uv (for BYO Pydantic AI agents).'
 	@echo ''
-	@echo '  make claude            Install/update Claude Code only.'
-	@echo '  make opencode          Install/update OpenCode only.'
-	@echo '  make pydantic          Install/update uv only.'
+	@echo '  make claude              Install/update Claude Code only.'
+	@echo '  make opencode            Install/update OpenCode only.'
+	@echo '  make pydantic            Install/update uv only.'
 	@echo ''
-	@echo '  make validate          Run the full validate suite (type-check, lint, tests).'
+	@echo '  make bootstrap           One-shot: install + Claude + `archon setup` wizard.'
+	@echo '  make bootstrap-opencode  One-shot: install + OpenCode + `archon setup` wizard.'
+	@echo '  make bootstrap-pydantic  One-shot: install + uv + `archon setup` wizard.'
+	@echo ''
+	@echo '  make validate            Run the full validate suite (type-check, lint, tests).'
 	@echo ''
 	@echo 'All targets are idempotent. Runtime installers handle both fresh installs and upgrades.'
 
@@ -97,6 +106,25 @@ pydantic: check-curl install
 	@echo ''
 	@echo 'uv ready. Add Python agents under .archon/agents/ (one module-level `agent: pydantic_ai.Agent` each).'
 	@echo 'Next: run `archon setup` — the Pydantic plugin scans .archon/agents/ and prints a config snippet.'
+
+setup: check-bun
+	@echo '→ Running `archon setup` wizard'
+	@# Interactive — detects every installed runtime (claude, opencode, uv) and
+	@# walks the user through auth mapping. Safe to re-run; merges with any
+	@# existing ~/.archon/.env.
+	bun run cli setup
+
+# One-shot bootstrap chains — install everything + run the wizard in one go.
+# New contributors should typically use one of these instead of stitching
+# install/runtime/setup together by hand. Each chain is idempotent because
+# every dependency target is idempotent.
+bootstrap: bootstrap-claude
+
+bootstrap-claude: install claude setup
+
+bootstrap-opencode: install opencode setup
+
+bootstrap-pydantic: install pydantic setup
 
 validate: check-bun
 	bun run validate

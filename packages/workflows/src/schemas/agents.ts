@@ -26,6 +26,16 @@ export const agentFrontmatterSchema = z.object({
   tools: z.array(z.string().min(1)).optional(),
   /** Optional bound on agent sub-turns (Claude SDK Task tool semantics). */
   maxTurns: z.number().int().positive().optional(),
+  /**
+   * Archon extension: free-form discovery tags — symmetric with skills.
+   * No validation beyond "array of non-empty strings".
+   */
+  tags: z.array(z.string().min(1)).optional(),
+  /**
+   * Archon extension: short usage examples — symmetric with skills. Longer
+   * narratives belong in the agent body.
+   */
+  examples: z.array(z.string().min(1)).optional(),
 });
 
 export type AgentFrontmatter = z.infer<typeof agentFrontmatterSchema>;
@@ -36,6 +46,10 @@ export interface ResolvedAgent {
   model?: string;
   tools?: string[];
   maxTurns?: number;
+  /** Optional discovery tags (see schema). */
+  tags?: string[];
+  /** Optional usage examples (see schema). */
+  examples?: string[];
   /** Markdown body → system prompt. */
   body: string;
   source: 'bundled' | 'global' | 'project';

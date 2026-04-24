@@ -114,20 +114,56 @@ export function mergeAliases(
   };
 }
 
+/** Maximum alias-chain depth. Longer chains are almost certainly a mistake. */
+export const ALIAS_CHAIN_DEPTH_CAP = 8;
+
 /**
- * Expand an alias to its canonical model. Returns `{model, expanded}` so the
- * caller can report whether expansion happened.
+ * Thrown when alias resolution walks into a cycle or exceeds the depth cap.
+ * Surfaces the chain so the user can find the offending edge.
+ */
+export class AliasResolutionError extends Error {
+  constructor(
+    message: string,
+    public readonly chain: string[]
+  ) {
+    super(`${message} (chain: ${chain.join(' → ')})`);
+    this.name = 'AliasResolutionError';
+  }
+}
+
+/**
+ * Expand an alias to its canonical model, following chains up to
+ * `ALIAS_CHAIN_DEPTH_CAP` hops. Throws `AliasResolutionError` on cycle or
+ * depth overflow — both are user errors in the merged models.yaml.
  *
- * Chains of aliases are not followed — one hop only. This is deliberate: alias
- * chains are a footgun and there's no motivating use case.
+ * Returns `{model, expanded, chain}` where `chain` is the expansion path
+ * starting from `value` (at least 1 entry; 2+ if expansion happened). The
+ * `chain` is useful for `archon models why` and similar diagnostics.
  */
 export function expandAlias(
   value: string,
   aliases: Record<string, string>
-): { model: string; expanded: boolean } {
-  const target = aliases[value];
-  if (target === undefined) return { model: value, expanded: false };
-  return { model: target, expanded: true };
+): { model: string; expanded: boolean; chain: string[] } {
+  const chain: string[] = [value];
+  const seen = new Set<string>([value]);
+  let current = value;
+  for (let hop = 0; hop < ALIAS_CHAIN_DEPTH_CAP; hop++) {
+    const target = aliases[current];
+    if (target === undefined) {
+      return { model: current, expanded: chain.length > 1, chain };
+    }
+    if (seen.has(target)) {
+      chain.push(target);
+      throw new AliasResolutionError('alias cycle detected', chain);
+    }
+    chain.push(target);
+    seen.add(target);
+    current = target;
+  }
+  throw new AliasResolutionError(
+    `alias chain exceeded depth cap (${ALIAS_CHAIN_DEPTH_CAP})`,
+    chain
+  );
 }
 
 /** Picks the first file in project→global→bundled order that has an entry for `name`. */
