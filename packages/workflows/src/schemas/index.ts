@@ -12,6 +12,15 @@
 export { stepRetryConfigSchema } from './retry';
 export type { StepRetryConfig } from './retry';
 
+// Model-assignment manifest (models.yaml)
+export {
+  modelsFileSchema,
+  modelsFileDefaultsSchema,
+  INHERIT_MODEL,
+  isInheritModel,
+} from './models';
+export type { ModelsFile, ModelsFileDefaults, InheritModel } from './models';
+
 // Loop node configuration
 export { loopNodeConfigSchema } from './loop';
 export type { LoopNodeConfig } from './loop';
