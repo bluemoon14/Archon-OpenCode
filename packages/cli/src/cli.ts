@@ -60,13 +60,16 @@ import { continueCommand } from './commands/continue';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
 import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
-import { skillsListCommand, skillsShowCommand } from './commands/skills';
+import { skillsCreateCommand, skillsListCommand, skillsShowCommand } from './commands/skills';
+import { doctorCommand } from './commands/doctor';
 import { agentsListCommand, agentsShowCommand } from './commands/agents';
 import {
+  modelsDiffCommand,
   modelsListCommand,
   modelsSetCommand,
   modelsResetCommand,
   modelsValidateCommand,
+  modelsWhyCommand,
 } from './commands/models';
 import { mcpServeCommand } from './commands/mcp';
 import { closeDatabase, loadGlobalConfig } from '@archon/core';
@@ -113,13 +116,17 @@ Commands:
   validate commands [name]   Validate command files
   skills list                List every skill (bundled + global + project)
   skills show <name>         Show a skill's SKILL.md body + resolved model
+  skills create <name>       Scaffold a new SKILL.md (--description required; --global for ~/.archon/)
   agents list                List every agent (bundled + global + project)
   agents show <name>         Show an agent's body + resolved model
   models list                Show the full skill/agent model-assignment table
   models set <kind> <name> <model>  Write a model assignment (kind: skill|agent|default|alias)
   models reset <kind> <name> Remove a project/global override
   models validate            Validate every models.yaml and check model routability
+  models diff <other>        Compare this repo's models.yaml to another's
+  models why <skill|agent> <name>  Trace the 8-tier resolver for a single skill or agent
   mcp serve                  Start the stdio MCP server (exposes skills/agents/models to Claude Code etc.)
+  doctor                     Health-check: claude + opencode + uv + LiteLLM proxy reachability
   version                    Show version info
   help                       Show this help message
 
@@ -347,6 +354,9 @@ async function main(): Promise<number> {
       case 'help':
         printUsage();
         break;
+
+      case 'doctor':
+        return await doctorCommand({ cwd: effectiveCwd, json: jsonFlag });
 
       case 'chat': {
         const chatMessage = positionals.slice(1).join(' ');
@@ -640,10 +650,32 @@ async function main(): Promise<number> {
             }
             return await skillsShowCommand({ cwd: effectiveCwd, name, json: jsonFlag });
           }
+          case 'create': {
+            const name = positionals[2];
+            if (name === undefined || name.length === 0) {
+              console.error(
+                'Usage: archon skills create <name> --description "Use when ..." [--global]'
+              );
+              return 1;
+            }
+            const descIdx = args.indexOf('--description');
+            const description = descIdx >= 0 ? args[descIdx + 1] : undefined;
+            if (description === undefined || description.length === 0) {
+              console.error('archon skills create requires --description "<one-line summary>".');
+              return 1;
+            }
+            const globalFlag = args.includes('--global');
+            return skillsCreateCommand({
+              cwd: effectiveCwd,
+              name,
+              description,
+              global: globalFlag,
+            });
+          }
           default:
             if (subcommand === undefined) console.error('Missing skills subcommand');
             else console.error(`Unknown skills subcommand: ${subcommand}`);
-            console.error('Available: list, show');
+            console.error('Available: list, show, create');
             return 1;
         }
 
@@ -719,10 +751,44 @@ async function main(): Promise<number> {
           }
           case 'validate':
             return await modelsValidateCommand({ cwd: effectiveCwd, json: jsonFlag });
+          case 'diff': {
+            const other = positionals[2];
+            if (other === undefined || other.length === 0) {
+              console.error(
+                'Usage: archon models diff <other-repo-root|path-to-models.yaml> [--global]'
+              );
+              return 1;
+            }
+            const globalFlag = args.includes('--global');
+            return await modelsDiffCommand({
+              cwd: effectiveCwd,
+              other,
+              scope: globalFlag ? 'global' : 'project',
+              json: jsonFlag,
+            });
+          }
+          case 'why': {
+            const kindArg = positionals[2];
+            const name = positionals[3];
+            if (
+              (kindArg !== 'skill' && kindArg !== 'agent') ||
+              name === undefined ||
+              name.length === 0
+            ) {
+              console.error('Usage: archon models why <skill|agent> <name>');
+              return 1;
+            }
+            return await modelsWhyCommand({
+              cwd: effectiveCwd,
+              kind: kindArg,
+              name,
+              json: jsonFlag,
+            });
+          }
           default:
             if (subcommand === undefined) console.error('Missing models subcommand');
             else console.error(`Unknown models subcommand: ${subcommand}`);
-            console.error('Available: list, set, reset, validate');
+            console.error('Available: list, set, reset, validate, diff, why');
             return 1;
         }
 

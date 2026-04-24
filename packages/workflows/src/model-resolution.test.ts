@@ -10,6 +10,8 @@ import {
   resolveAgentModel,
   resolveNodeModel,
   resolveSkillModel,
+  traceAgentModel,
+  traceSkillModel,
 } from './model-resolution';
 
 const bundledModels: ModelsFile = {
@@ -337,5 +339,55 @@ describe('resolveNodeModel', () => {
 
   test('throws when nothing is supplied', () => {
     expect(() => resolveNodeModel({})).toThrow(/Cannot resolve model for node/);
+  });
+});
+
+describe('traceSkillModel', () => {
+  test('records all 8 tiers with exactly one winner — bundled hit', () => {
+    const trace = traceSkillModel({
+      skillName: 'systematic-debugging',
+      bundled: bundledModels,
+      defaultAssistantModel: 'sonnet',
+    });
+    expect(trace.trace).toHaveLength(8);
+    const winners = trace.trace.filter(t => t.winner);
+    expect(winners).toHaveLength(1);
+    expect(winners[0].tier).toBe(4); // bundled
+    expect(trace.model).toBe('anthropic/claude-haiku-4-5');
+  });
+
+  test('project override wins — tier 2 fires', () => {
+    const trace = traceSkillModel({
+      skillName: 'brainstorming',
+      bundled: bundledModels,
+      global: globalModels,
+      project: projectModels,
+      defaultAssistantModel: 'sonnet',
+    });
+    const winners = trace.trace.filter(t => t.winner);
+    expect(winners).toHaveLength(1);
+    expect(winners[0].tier).toBe(2); // project
+    expect(winners[0].value).toBe('novita/deepseek/deepseek-r1');
+    // Lower-tier values are still recorded even though they didn't win.
+    const bundledRow = trace.trace.find(t => t.tier === 4);
+    expect(bundledRow?.value).toBe('anthropic/claude-haiku-4-5');
+    expect(bundledRow?.winner).toBe(false);
+  });
+
+  test('alias winner surfaces raw + aliasExpanded in trace result', () => {
+    // project: agents.code-reviewer = 'fast'; alias 'fast' resolves via
+    // bundled aliases map to anthropic/claude-haiku-4-5.
+    const trace = traceAgentModel({
+      agentName: 'code-reviewer',
+      bundled: bundledModels,
+      project: projectModels,
+      defaultAssistantModel: 'sonnet',
+    });
+    expect(trace.model).toBe('anthropic/claude-haiku-4-5');
+    expect(trace.raw).toBe('fast');
+    expect(trace.aliasExpanded).toBe(true);
+    const winners = trace.trace.filter(t => t.winner);
+    expect(winners).toHaveLength(1);
+    expect(winners[0].tier).toBe(2); // project
   });
 });

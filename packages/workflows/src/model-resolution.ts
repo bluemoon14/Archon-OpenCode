@@ -347,3 +347,157 @@ function finalizeAssistant(
     raw: defaultAssistantModel,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Tracing — record every tier the resolver considered, not just the winner.
+// Used by `archon models why <name>` to show users exactly why a model was
+// chosen (or why something unexpected is winning). Pure — no IO.
+// ---------------------------------------------------------------------------
+
+/**
+ * One step in a trace walk. Each tier is visited in order; at most one is
+ * marked `winner`. A `skipped` tier is one the resolver considered but that
+ * didn't produce a value (e.g. no override provided, or no bundled entry
+ * for the key). `value` is only set when a tier contributed something.
+ */
+export interface TierCheck {
+  tier: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  source: AssignmentSource;
+  /** Human-readable label for the tier (e.g. "runtime override"). */
+  label: string;
+  /** Value that tier produced (undefined means the tier was skipped). */
+  value?: string;
+  /** True if this tier won the resolution. Only one entry has this true. */
+  winner: boolean;
+}
+
+export interface ResolvedModelWithTrace extends ResolvedModel {
+  trace: TierCheck[];
+}
+
+/**
+ * Like `resolveSkillModel` but also returns a trace of every tier the
+ * resolver considered. The resolved result is identical to what
+ * `resolveSkillModel` returns. Uses the same 8-tier order documented at
+ * the top of this module.
+ */
+export function traceSkillModel(ctx: SkillModelContext): ResolvedModelWithTrace {
+  return traceInternal({
+    lookupName: ctx.skillName,
+    kind: 'skill',
+    group: 'skills',
+    override: ctx.override,
+    project: ctx.project,
+    global: ctx.global,
+    bundled: ctx.bundled,
+    frontmatter: ctx.frontmatter,
+    ownerNodeModel: ctx.ownerNodeModel,
+    defaultAssistantModel: ctx.defaultAssistantModel,
+  });
+}
+
+/**
+ * Like `resolveAgentModel` but also returns a trace — see `traceSkillModel`.
+ */
+export function traceAgentModel(ctx: AgentModelContext): ResolvedModelWithTrace {
+  return traceInternal({
+    lookupName: ctx.agentName,
+    kind: 'agent',
+    group: 'agents',
+    override: ctx.override,
+    project: ctx.project,
+    global: ctx.global,
+    bundled: ctx.bundled,
+    frontmatter: ctx.frontmatter,
+    ownerNodeModel: ctx.ownerNodeModel,
+    defaultAssistantModel: ctx.defaultAssistantModel,
+  });
+}
+
+interface TraceInternalCtx {
+  lookupName: string;
+  kind: 'skill' | 'agent';
+  group: 'skills' | 'agents';
+  override?: string;
+  project?: ModelsFile;
+  global?: ModelsFile;
+  bundled?: ModelsFile;
+  frontmatter?: string;
+  ownerNodeModel?: string;
+  defaultAssistantModel?: string;
+}
+
+function traceInternal(ctx: TraceInternalCtx): ResolvedModelWithTrace {
+  const aliases = mergeAliases(ctx.bundled, ctx.global, ctx.project);
+  const trace: TierCheck[] = [];
+
+  // Precompute every tier's candidate value so the trace is complete even
+  // for skipped tiers. Only the winning tier is finalized.
+  const overrideValue = ctx.override;
+  const projectValue = ctx.project?.[ctx.group]?.[ctx.lookupName];
+  const globalValue = ctx.global?.[ctx.group]?.[ctx.lookupName];
+  const bundledValue = ctx.bundled?.[ctx.group]?.[ctx.lookupName];
+  const frontmatterValue =
+    ctx.frontmatter !== undefined && ctx.frontmatter.length > 0 ? ctx.frontmatter : undefined;
+  const defaultValue = pickDefault(ctx.kind, ctx.project, ctx.global, ctx.bundled);
+  const ownerValue =
+    ctx.ownerNodeModel !== undefined && ctx.ownerNodeModel.length > 0
+      ? ctx.ownerNodeModel
+      : undefined;
+  const assistantValue =
+    ctx.defaultAssistantModel !== undefined && ctx.defaultAssistantModel.length > 0
+      ? ctx.defaultAssistantModel
+      : undefined;
+
+  interface TierDef {
+    tier: TierCheck['tier'];
+    source: AssignmentSource;
+    label: string;
+    value: string | undefined;
+  }
+  const tiers: TierDef[] = [
+    { tier: 1, source: 'override', label: 'runtime override', value: overrideValue },
+    { tier: 2, source: 'project', label: 'project models.yaml', value: projectValue },
+    { tier: 3, source: 'global', label: 'global models.yaml', value: globalValue },
+    { tier: 4, source: 'bundled', label: 'bundled models.yaml', value: bundledValue },
+    { tier: 5, source: 'frontmatter', label: 'SKILL.md frontmatter', value: frontmatterValue },
+    {
+      tier: 6,
+      source: 'default',
+      label: `category default (defaults.${ctx.kind})`,
+      value: defaultValue,
+    },
+    { tier: 7, source: 'inherit', label: 'owner node model', value: ownerValue },
+    { tier: 8, source: 'assistant', label: 'default assistant model', value: assistantValue },
+  ];
+
+  let winner: { tier: TierDef; resolved: ResolvedModel } | undefined;
+
+  for (const t of tiers) {
+    if (winner === undefined && t.value !== undefined) {
+      const resolved =
+        t.source === 'inherit'
+          ? finalizeInherited(t.value, aliases)
+          : t.source === 'assistant'
+            ? finalizeAssistant(t.value, ctx.lookupName, ctx.kind, aliases)
+            : finalize(t.value, t.source, ctx.ownerNodeModel, aliases);
+      trace.push({ tier: t.tier, source: t.source, label: t.label, value: t.value, winner: true });
+      winner = { tier: t, resolved };
+    } else {
+      trace.push({
+        tier: t.tier,
+        source: t.source,
+        label: t.label,
+        value: t.value,
+        winner: false,
+      });
+    }
+  }
+
+  if (winner === undefined) {
+    throw new Error(
+      `Cannot resolve model for ${ctx.kind} '${ctx.lookupName}': no tier produced a value.`
+    );
+  }
+  return { ...winner.resolved, trace };
+}
