@@ -107,6 +107,44 @@ export class LiteLLMProvider implements IAgentProvider {
       body.fallbacks = [options.fallbackModel];
     }
 
+    // Cost ceiling: LiteLLM supports `max_budget` as a per-request hard cap
+    // (USD). The proxy enforces + returns a 400 when the inferred cost
+    // would exceed it, which we bubble as `ProviderError('...', 'unknown')`.
+    if (options?.maxBudgetUsd !== undefined) {
+      body.max_budget = options.maxBudgetUsd;
+    }
+
+    // Structured output: map Archon's outputFormat → OpenAI's
+    // response_format. Supported upstream by LiteLLM. The stream translator
+    // parses the final assistant text as JSON and attaches the result to the
+    // terminal `result` chunk's `structuredOutput` field.
+    let expectsStructuredOutput = false;
+    if (options?.outputFormat?.type === 'json_schema') {
+      expectsStructuredOutput = true;
+      body.response_format = {
+        type: 'json_schema',
+        json_schema: {
+          name: 'archon_response',
+          schema: options.outputFormat.schema,
+          strict: true,
+        },
+      };
+    }
+
+    // Tool-use: translate `nodeConfig.allowed_tools` → OpenAI function shape.
+    // OpenAI doesn't have a native `denied_tools` concept — we warn (as a
+    // system chunk) and only forward the allow-list. This is still useful
+    // because many real-world workflow nodes use only allowed_tools.
+    const allowedTools = options?.nodeConfig?.allowed_tools;
+    const deniedTools = options?.nodeConfig?.denied_tools;
+    const deniedToolsIgnored = deniedTools !== undefined && deniedTools.length > 0;
+    if (allowedTools !== undefined && allowedTools.length > 0) {
+      body.tools = allowedTools.map(name => ({
+        type: 'function' as const,
+        function: { name, description: '', parameters: { type: 'object', properties: {} } },
+      }));
+    }
+
     getLog().info(
       {
         model,
@@ -127,10 +165,20 @@ export class LiteLLMProvider implements IAgentProvider {
       throw toProviderError(err);
     }
 
+    if (deniedToolsIgnored) {
+      yield {
+        type: 'system' as const,
+        content:
+          '⚠️ LiteLLM does not support `denied_tools`. Only `allowed_tools` is forwarded ' +
+          '— if your upstream provider offers a different tool gating mechanism, ' +
+          'configure it on the provider directly.',
+      };
+    }
+
     try {
       yield* translateOpenAIStream(
         stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
-        { model }
+        { model, expectsStructuredOutput }
       );
     } catch (err) {
       throw toProviderError(err);

@@ -87,3 +87,122 @@ describe('translateOpenAIStream', () => {
     expect(out[0].type).toBe('result');
   });
 });
+
+describe('translateOpenAIStream — tool calling', () => {
+  function makeToolChunk(
+    index: number,
+    parts: { id?: string; name?: string; args?: string },
+    finish?: string | null
+  ): OpenAI.Chat.Completions.ChatCompletionChunk {
+    const delta: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta = {
+      tool_calls: [
+        {
+          index,
+          ...(parts.id !== undefined ? { id: parts.id } : {}),
+          type: 'function' as const,
+          function: {
+            ...(parts.name !== undefined ? { name: parts.name } : {}),
+            ...(parts.args !== undefined ? { arguments: parts.args } : {}),
+          },
+        },
+      ],
+    };
+    return {
+      id: 'x',
+      choices: [
+        {
+          index: 0,
+          delta,
+          finish_reason: (finish ??
+            null) as OpenAI.Chat.Completions.ChatCompletionChunk.Choice['finish_reason'],
+          logprobs: null,
+        },
+      ],
+      created: 0,
+      model: 'x',
+      object: 'chat.completion.chunk',
+    } as OpenAI.Chat.Completions.ChatCompletionChunk;
+  }
+
+  test('accumulates per-index tool_call deltas into one tool chunk', async () => {
+    const chunks = [
+      makeToolChunk(0, { id: 'call_abc', name: 'sea', args: '{"qu' }),
+      makeToolChunk(0, { args: 'ery":"archon' }),
+      makeToolChunk(0, { args: '"}' }, 'tool_calls'),
+    ];
+    const out = await collect(translateOpenAIStream(iter(chunks), { model: 'openai/gpt-4o' }));
+    const toolChunks = out.filter(c => c.type === 'tool');
+    expect(toolChunks).toHaveLength(1);
+    if (toolChunks[0].type === 'tool') {
+      expect(toolChunks[0].toolName).toBe('sea');
+      expect(toolChunks[0].toolInput).toEqual({ query: 'archon' });
+      expect(toolChunks[0].toolCallId).toBe('call_abc');
+    }
+  });
+
+  test('emits _rawArgs when tool_call arguments are invalid JSON', async () => {
+    const chunks = [makeToolChunk(0, { id: 'c1', name: 'bad', args: 'not json' }, 'tool_calls')];
+    const out = await collect(translateOpenAIStream(iter(chunks), { model: 'openai/gpt-4o' }));
+    const tool = out.find(c => c.type === 'tool');
+    if (tool?.type === 'tool') {
+      expect(tool.toolInput).toEqual({ _rawArgs: 'not json' });
+    }
+  });
+
+  test('multiple parallel tool_calls each become separate tool chunks', async () => {
+    const chunks = [
+      makeToolChunk(0, { id: 'a', name: 'read', args: '{"path":"/x"}' }),
+      makeToolChunk(1, { id: 'b', name: 'grep', args: '{"q":"y"}' }, 'tool_calls'),
+    ];
+    const out = await collect(translateOpenAIStream(iter(chunks), { model: 'openai/gpt-4o' }));
+    const tools = out.filter(c => c.type === 'tool');
+    expect(tools).toHaveLength(2);
+  });
+});
+
+describe('translateOpenAIStream — structured output', () => {
+  test('parses final JSON and attaches to result.structuredOutput', async () => {
+    const chunks = [makeChunk('{"answer":'), makeChunk(' 42}', 'stop')];
+    const out = await collect(
+      translateOpenAIStream(iter(chunks), {
+        model: 'openai/gpt-4o',
+        expectsStructuredOutput: true,
+      })
+    );
+    const result = out.find(c => c.type === 'result');
+    if (result?.type === 'result') {
+      expect(result.structuredOutput).toEqual({ answer: 42 });
+      expect(result.isError).toBe(false);
+    }
+  });
+
+  test('flags isError when expected JSON response is malformed', async () => {
+    const chunks = [makeChunk('not json at all', 'stop')];
+    const out = await collect(
+      translateOpenAIStream(iter(chunks), {
+        model: 'openai/gpt-4o',
+        expectsStructuredOutput: true,
+      })
+    );
+    const result = out.find(c => c.type === 'result');
+    if (result?.type === 'result') {
+      expect(result.structuredOutput).toBeUndefined();
+      expect(result.isError).toBe(true);
+    }
+  });
+
+  test('non-structured stream still parses cleanly (expectsStructuredOutput: false)', async () => {
+    const chunks = [makeChunk('plain text', 'stop')];
+    const out = await collect(
+      translateOpenAIStream(iter(chunks), {
+        model: 'openai/gpt-4o',
+        expectsStructuredOutput: false,
+      })
+    );
+    const result = out.find(c => c.type === 'result');
+    if (result?.type === 'result') {
+      expect(result.structuredOutput).toBeUndefined();
+      expect(result.isError).toBe(false);
+    }
+  });
+});

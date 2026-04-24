@@ -228,6 +228,94 @@ describe('LiteLLMProvider.sendQuery', () => {
     expect(chatCreateMock).toHaveBeenCalledTimes(1);
   });
 
+  test('forwards maxBudgetUsd as LiteLLM max_budget body param', async () => {
+    chatCreateMock.mockImplementation((body: unknown) => {
+      const b = body as { max_budget?: number };
+      expect(b.max_budget).toBe(0.25);
+      return Promise.resolve(makeStream([{ content: 'ok', finish: 'stop' }]));
+    });
+
+    const provider = new LiteLLMProvider();
+    await collect(
+      provider.sendQuery('x', '/tmp', undefined, {
+        model: 'openai/gpt-4o',
+        maxBudgetUsd: 0.25,
+        assistantConfig: { baseUrl: 'http://127.0.0.1:4000' },
+      })
+    );
+  });
+
+  test('outputFormat maps to response_format json_schema body param', async () => {
+    chatCreateMock.mockImplementation((body: unknown) => {
+      const b = body as {
+        response_format?: {
+          type: string;
+          json_schema: { name: string; schema: unknown; strict: boolean };
+        };
+      };
+      expect(b.response_format?.type).toBe('json_schema');
+      expect(b.response_format?.json_schema.schema).toEqual({
+        type: 'object',
+        properties: { answer: { type: 'number' } },
+      });
+      expect(b.response_format?.json_schema.strict).toBe(true);
+      return Promise.resolve(makeStream([{ content: '{"answer":42}', finish: 'stop' }]));
+    });
+
+    const provider = new LiteLLMProvider();
+    const out = await collect(
+      provider.sendQuery('x', '/tmp', undefined, {
+        model: 'openai/gpt-4o',
+        outputFormat: {
+          type: 'json_schema',
+          schema: { type: 'object', properties: { answer: { type: 'number' } } },
+        },
+        assistantConfig: { baseUrl: 'http://127.0.0.1:4000' },
+      })
+    );
+    const result = out.find(c => c.type === 'result');
+    if (result?.type === 'result') {
+      expect(result.structuredOutput).toEqual({ answer: 42 });
+    }
+  });
+
+  test('allowed_tools translates to OpenAI tools array', async () => {
+    chatCreateMock.mockImplementation((body: unknown) => {
+      const b = body as { tools?: { type: string; function: { name: string } }[] };
+      expect(b.tools).toHaveLength(2);
+      expect(b.tools?.map(t => t.function.name)).toEqual(['Read', 'Grep']);
+      return Promise.resolve(makeStream([{ content: 'ok', finish: 'stop' }]));
+    });
+
+    const provider = new LiteLLMProvider();
+    await collect(
+      provider.sendQuery('x', '/tmp', undefined, {
+        model: 'openai/gpt-4o',
+        nodeConfig: { allowed_tools: ['Read', 'Grep'] },
+        assistantConfig: { baseUrl: 'http://127.0.0.1:4000' },
+      })
+    );
+  });
+
+  test('denied_tools without allowed_tools emits a system warning chunk', async () => {
+    chatCreateMock.mockImplementation(() =>
+      Promise.resolve(makeStream([{ content: 'ok', finish: 'stop' }]))
+    );
+
+    const provider = new LiteLLMProvider();
+    const out = await collect(
+      provider.sendQuery('x', '/tmp', undefined, {
+        model: 'openai/gpt-4o',
+        nodeConfig: { denied_tools: ['Write'] },
+        assistantConfig: { baseUrl: 'http://127.0.0.1:4000' },
+      })
+    );
+    const systemChunks = out.filter(c => c.type === 'system');
+    expect(systemChunks.length).toBeGreaterThan(0);
+    const combined = systemChunks.map(c => (c.type === 'system' ? c.content : '')).join('\n');
+    expect(combined).toContain('denied_tools');
+  });
+
   test('translates a 429 error to rate_limit ProviderError', async () => {
     chatCreateMock.mockImplementation(() => {
       const err = new Error('Rate limited') as Error & { status: number };
