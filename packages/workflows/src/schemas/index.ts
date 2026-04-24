@@ -21,6 +21,14 @@ export {
 } from './models';
 export type { ModelsFile, ModelsFileDefaults, InheritModel } from './models';
 
+// Skills (SKILL.md frontmatter + resolved body)
+export { skillFrontmatterSchema } from './skills';
+export type { SkillFrontmatter, ResolvedSkill } from './skills';
+
+// Agents (<name>.md frontmatter + resolved body)
+export { agentFrontmatterSchema } from './agents';
+export type { AgentFrontmatter, ResolvedAgent } from './agents';
+
 // Loop node configuration
 export { loopNodeConfigSchema } from './loop';
 export type { LoopNodeConfig } from './loop';
