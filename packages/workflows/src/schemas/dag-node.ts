@@ -527,12 +527,18 @@ export const dagNodeSchema = dagNodeBaseSchema
       });
     }
 
-    // Pydantic agent selection: `agent:` is only meaningful when provider is pydantic.
-    if (data.agent !== undefined && data.provider !== 'pydantic') {
+    // Pydantic agent selection: `agent:` is only meaningful when the active
+    // provider is pydantic. The workflow-level provider is not visible here,
+    // so the check only fires when the NODE explicitly sets a non-pydantic
+    // provider — a belt-and-braces user-input mistake. Workflow-level
+    // `provider: pydantic` with `agent:` on nodes (and no per-node provider)
+    // validates fine; mismatches where the active provider isn't pydantic
+    // surface at runtime with "Agent X not configured" from the Pydantic
+    // provider.
+    if (data.agent !== undefined && data.provider !== undefined && data.provider !== 'pydantic') {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          "'agent' is only valid when provider is 'pydantic' (names a configured Pydantic AI agent)",
+        message: `'agent' is only valid when provider is 'pydantic' (got '${data.provider}')`,
         path: ['agent'],
       });
     }

@@ -1,0 +1,27 @@
+# E2E smoke test — OpenCode provider
+# Verifies: OpenCode server spawn + session.prompt + event->MessageChunk mapping.
+# Requires: `opencode` on PATH (or OPENCODE_BIN_PATH set), and an upstream API
+# key configured in OpenCode (e.g. OPENAI_API_KEY env).
+name: e2e-opencode-smoke
+description: "Smoke test for OpenCode provider. Verifies prompt response."
+provider: opencode
+model: opencode/openai/gpt-4o-mini
+
+nodes:
+  # 1. Simple prompt — spawns `opencode serve`, fires one session.prompt,
+  #    expects a complete response via the event stream.
+  - id: simple
+    prompt: "What is 2+2? Answer with just the number, nothing else."
+    allowed_tools: []
+    idle_timeout: 60000
+
+  # 2. Assert non-empty output — fails CI if OpenCode returned nothing.
+  - id: assert
+    bash: |
+      output="$simple.output"
+      if [ -z "$output" ]; then
+        echo "FAIL: simple node returned empty output"
+        exit 1
+      fi
+      echo "PASS: simple=$output"
+    depends_on: [simple]

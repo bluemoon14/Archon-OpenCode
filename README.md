@@ -84,7 +84,7 @@ $ archon workflow run archon-idea-to-pr "Add dark mode to the settings page"
 ### Prerequisites
 
 - **Bun** — [bun.sh](https://bun.sh)
-- **Claude Code** — [claude.ai/code](https://claude.ai/code)
+- At least one supported AI runtime — **Claude Code** ([claude.ai/code](https://claude.ai/code)) is the default; **OpenCode** and **custom Pydantic AI agents** are also supported (see [Supported agent runtimes](#supported-agent-runtimes)).
 - **GitHub CLI** (optional, used by workflows that create issues/PRs) — [cli.github.com](https://cli.github.com/)
 
 ### Install
@@ -125,6 +125,14 @@ archon workflow list                  # see available workflows
 archon workflow run <name> "<task>"   # run one
 archon workflow status                # show active/recent runs
 ```
+
+## Supported agent runtimes
+
+Archon drives three AI runtimes, selectable per workflow node:
+
+- **Claude Code** (default) — uses the [`@anthropic-ai/claude-agent-sdk`](https://docs.claude.com/claude-code). No extra config when `claude` is on PATH.
+- **OpenCode** — Archon spawns `opencode serve` per session and talks to it via [`@opencode-ai/sdk`](https://opencode.ai/docs/sdk/). Install `opencode`, then write `provider: opencode` on a node. See [`packages/providers/src/opencode/README.md`](./packages/providers/src/opencode/README.md).
+- **Pydantic AI (BYO)** — you write a Python file exporting a `pydantic_ai.Agent`; Archon invokes it over a JSONL stdio bridge spawned with `uv`. See [`packages/providers/src/pydantic/README.md`](./packages/providers/src/pydantic/README.md).
 
 ## Default Workflows
 
