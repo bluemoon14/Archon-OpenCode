@@ -29,6 +29,7 @@ import {
   gatherSkillDetail,
   gatherSkillsList,
 } from '../commands/registry-data';
+import { resumeWorkflow, runWorkflow, statusWorkflow } from './tools/workflow';
 
 let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
@@ -146,6 +147,93 @@ export function createArchonMcpServer(opts: ArchonMcpServerOptions = {}): McpSer
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(table, null, 2) }],
       };
+    }
+  );
+
+  server.registerTool(
+    'archon_workflow_run',
+    {
+      description:
+        'Run a workflow by name and block until completion. Returns {status, workflowName, ' +
+        'runId?, error?}. BLOCKING — for long workflows prefer kicking off via a shell tool ' +
+        '(`archon workflow run ... &`) and polling via `archon_workflow_status`.',
+      inputSchema: {
+        name: z.string().describe('Workflow name (matches `archon workflow list`)'),
+        args: z.string().optional().describe('Positional argument string ($ARGUMENTS)'),
+        branchName: z.string().optional().describe('Optional worktree branch override'),
+        noWorktree: z.boolean().optional().describe('Disable worktree isolation'),
+      },
+    },
+    async input => {
+      try {
+        const out = await runWorkflow(input, cwd);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    'archon_workflow_status',
+    {
+      description:
+        'Snapshot workflow run state. With no runId: returns every running + paused run. With ' +
+        'a runId: returns that run. Use for polling long workflows kicked off via shell or ' +
+        'earlier MCP calls.',
+      inputSchema: {
+        runId: z.string().optional().describe('Workflow run ID (UUID). Omit to list active runs.'),
+      },
+    },
+    async input => {
+      try {
+        const out = await statusWorkflow(input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    'archon_workflow_resume',
+    {
+      description:
+        'Resume a paused or failed workflow run. Validates the run is resumable and returns ' +
+        '{runId, workflowName, status}. Does not block on completion — use `archon_workflow_status` ' +
+        'to poll.',
+      inputSchema: {
+        runId: z.string().describe('Workflow run ID (UUID) to resume'),
+      },
+    },
+    async input => {
+      try {
+        const out = await resumeWorkflow(input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
     }
   );
 

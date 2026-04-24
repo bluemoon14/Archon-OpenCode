@@ -44,7 +44,7 @@ async function callTool(
 }
 
 describe('createArchonMcpServer', () => {
-  test('registers every documented discovery tool', () => {
+  test('registers every documented tool (5 discovery + 3 workflow)', () => {
     const server = createArchonMcpServer({ cwd: process.cwd() });
     const tools = getTools(server);
     for (const name of [
@@ -53,6 +53,9 @@ describe('createArchonMcpServer', () => {
       'archon_agents_list',
       'archon_agents_show',
       'archon_models_list',
+      'archon_workflow_run',
+      'archon_workflow_status',
+      'archon_workflow_resume',
     ]) {
       expect(tools.has(name)).toBe(true);
     }
@@ -129,5 +132,23 @@ describe('createArchonMcpServer', () => {
     expect(Object.keys(parsed.aliases)).toContain('smart');
     expect(parsed.skills.length).toBeGreaterThanOrEqual(14);
     expect(parsed.agents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('archon_workflow_status for an unknown runId returns an error envelope', async () => {
+    const server = createArchonMcpServer({ cwd: process.cwd() });
+    const { isError, text } = await callTool(server, 'archon_workflow_status', {
+      runId: '00000000-0000-0000-0000-000000000000',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('not found');
+  });
+
+  test('archon_workflow_resume for an unknown runId returns an error envelope', async () => {
+    const server = createArchonMcpServer({ cwd: process.cwd() });
+    const { isError, text } = await callTool(server, 'archon_workflow_resume', {
+      runId: '00000000-0000-0000-0000-000000000000',
+    });
+    expect(isError).toBe(true);
+    expect(text.length).toBeGreaterThan(0);
   });
 });
