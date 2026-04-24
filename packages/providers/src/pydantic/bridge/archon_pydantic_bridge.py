@@ -137,14 +137,33 @@ def _usage_to_tokens(usage: Any) -> dict[str, int]:
 # --------------------------------------------------------------------------- #
 
 
-async def _run_query(agent: Any, query_id: str, prompt: str) -> None:
+async def _run_query(
+    agent: Any,
+    query_id: str,
+    prompt: str,
+    system_context: str | None = None,
+) -> None:
     """Run one query to completion, emitting chunks along the way. Raises on
-    any agent-raised exception — caller translates to an `error` envelope."""
+    any agent-raised exception — caller translates to an `error` envelope.
+
+    `system_context` is optional Archon-assembled system-level content
+    (user systemPrompt + resolvedSkills + resolvedAgents, already folded
+    into one string by the TypeScript caller). When present we prepend it
+    to the user prompt with a clear delimiter so user agents that don't
+    opt in to a message-history API still see the context. User agents
+    remain free to strip or reshape it before model invocation."""
     # Lazy import so agent_import_error still wraps pydantic-ai import
     # failures, not module-load-time issues in this bridge.
     from pydantic_ai import messages as pa_messages
 
-    async for event in agent.run_stream_events(prompt):
+    effective_prompt = prompt
+    if system_context:
+        effective_prompt = (
+            f"[Archon context]\n{system_context}\n\n"
+            f"[User prompt]\n{prompt}"
+        )
+
+    async for event in agent.run_stream_events(effective_prompt):
         kind = getattr(event, "event_kind", None)
 
         if kind == "part_start":
@@ -295,8 +314,14 @@ async def _main(agent_path: Path) -> int:
 
         query_id = str(envelope.get("id", ""))
         prompt = str(envelope.get("prompt", ""))
+        raw_system_context = envelope.get("systemContext")
+        system_context = (
+            raw_system_context if isinstance(raw_system_context, str) else None
+        )
         current_id = query_id
-        current_task = asyncio.create_task(_run_query(agent, query_id, prompt))
+        current_task = asyncio.create_task(
+            _run_query(agent, query_id, prompt, system_context)
+        )
 
         try:
             await current_task

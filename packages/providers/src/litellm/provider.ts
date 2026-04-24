@@ -30,6 +30,7 @@ import type {
   SendQueryOptions,
 } from '../types';
 import { ProviderError } from '../errors';
+import { buildResolvedSystemPrompt } from '../resolved-content-prompt';
 import { LITELLM_CAPABILITIES } from './capabilities';
 import { parseLiteLLMConfig } from './config';
 import { getOrStartProxy } from './proxy';
@@ -155,31 +156,13 @@ function buildMessages(
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
-  const systemParts: string[] = [];
-  if (input.systemPrompt !== undefined && input.systemPrompt.length > 0) {
-    systemParts.push(input.systemPrompt);
-  }
-  if (input.resolvedSkills !== undefined && input.resolvedSkills.length > 0) {
-    const skillsBlock = input.resolvedSkills
-      .map(s => `## Skill: ${s.name}\n\n${s.description}\n\n${s.body}`)
-      .join('\n\n---\n\n');
-    systemParts.push(
-      `You have the following preloaded skills. Use them when relevant to the task:\n\n${skillsBlock}`
-    );
-  }
-  if (input.resolvedAgents !== undefined && input.resolvedAgents.length > 0) {
-    // LiteLLM has no native subagent concept — surface agent prompts as
-    // additional system-prompt sections so the model gets the context.
-    const agentsBlock = input.resolvedAgents
-      .map(a => `## Available sub-agent: ${a.id}\n\n${a.description}\n\n${a.prompt}`)
-      .join('\n\n---\n\n');
-    systemParts.push(
-      `The following sub-agent personas are available. Incorporate their perspectives when appropriate:\n\n${agentsBlock}`
-    );
-  }
-
-  if (systemParts.length > 0) {
-    messages.push({ role: 'system', content: systemParts.join('\n\n---\n\n') });
+  const systemContent = buildResolvedSystemPrompt({
+    systemPrompt: input.systemPrompt,
+    resolvedSkills: input.resolvedSkills,
+    resolvedAgents: input.resolvedAgents,
+  });
+  if (systemContent !== undefined) {
+    messages.push({ role: 'system', content: systemContent });
   }
   messages.push({ role: 'user', content: input.userPrompt });
   return messages;

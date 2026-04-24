@@ -25,6 +25,7 @@ import { parseOpenCodeConfig, parseOpenCodeModel, resolveOpencodeAuthEnv } from 
 import { resolveOpencodeBinaryPath, prependBinaryDirToPath } from './binary-resolver';
 import { OPENCODE_CAPABILITIES } from './capabilities';
 import { createMapperState, mapEvent } from './event-mapper';
+import { buildResolvedSystemPrompt } from '../resolved-content-prompt';
 
 let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
@@ -154,6 +155,15 @@ export class OpenCodeProvider implements IAgentProvider {
     }
     const stream = eventsResp.stream as AsyncIterable<Event>;
 
+    // Merge the node-level systemPrompt with Archon-resolved skill/agent
+    // content so OpenCode's session sees the same context as Claude/LiteLLM.
+    // When nothing to inject, OpenCode defaults apply.
+    const systemContent = buildResolvedSystemPrompt({
+      systemPrompt: options?.systemPrompt,
+      resolvedSkills: options?.resolvedSkills,
+      resolvedAgents: options?.resolvedAgents,
+    });
+
     // Fire the prompt; don't await its final result here. The stream yields
     // terminal `message.updated` with `finish` set — that's our signal.
     const promptPromise = client.session.prompt({
@@ -164,7 +174,7 @@ export class OpenCodeProvider implements IAgentProvider {
         ...(options?.nodeConfig?.allowed_tools || options?.nodeConfig?.denied_tools
           ? { tools: buildToolFilter(options.nodeConfig) }
           : {}),
-        ...(options?.systemPrompt ? { system: options.systemPrompt } : {}),
+        ...(systemContent !== undefined ? { system: systemContent } : {}),
       },
     });
 

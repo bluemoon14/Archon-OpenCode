@@ -154,16 +154,28 @@ export class PydanticBridge {
     id: string,
     prompt: string,
     cwd: string,
-    env?: Record<string, string>
+    env?: Record<string, string>,
+    /**
+     * Optional system-level context (systemPrompt + resolvedSkills +
+     * resolvedAgents, already folded into one string). The bridge prepends
+     * this to the user prompt before calling `agent.run()` so Pydantic nodes
+     * receive the same skill/agent context as Claude / OpenCode / LiteLLM.
+     * See bridge-protocol.md §query envelope.
+     */
+    systemContext?: string
   ): AsyncGenerator<BridgeEnvelope> {
-    this.write({
+    const envelope: BridgeEnvelope = {
       v: 1,
       kind: 'query',
       id,
       prompt,
       cwd,
       env: env ?? {},
-    });
+    };
+    if (systemContext !== undefined && systemContext.length > 0) {
+      envelope.systemContext = systemContext;
+    }
+    this.write(envelope);
 
     while (true) {
       const envelope = await this.nextLine();

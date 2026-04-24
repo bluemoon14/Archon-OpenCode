@@ -23,6 +23,7 @@ import { parsePydanticConfig, resolveAgentEntry } from './config';
 import { resolveUvBinaryPath } from './python-resolver';
 import { PydanticBridge, defaultBridgeScriptPath, envelopeToMessageChunk } from './bridge-client';
 import { PYDANTIC_CAPABILITIES } from './capabilities';
+import { buildResolvedSystemPrompt } from '../resolved-content-prompt';
 import { randomUUID } from 'node:crypto';
 
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -80,8 +81,20 @@ export class PydanticProvider implements IAgentProvider {
     };
     options?.abortSignal?.addEventListener('abort', abortListener);
 
+    const systemContext = buildResolvedSystemPrompt({
+      systemPrompt: options?.systemPrompt,
+      resolvedSkills: options?.resolvedSkills,
+      resolvedAgents: options?.resolvedAgents,
+    });
+
     try {
-      for await (const envelope of bridge.sendQuery(queryId, prompt, cwd, options?.env)) {
+      for await (const envelope of bridge.sendQuery(
+        queryId,
+        prompt,
+        cwd,
+        options?.env,
+        systemContext
+      )) {
         if (envelope.kind === 'error') {
           const code = typeof envelope.code === 'string' ? envelope.code : 'unknown';
           const message =

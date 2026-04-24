@@ -31,7 +31,7 @@ envelope has been received.
 ### Host → Bridge
 
 ```jsonc
-{"v":1,"kind":"query","id":"<uuid>","prompt":"...","cwd":"...","env":{"KEY":"VAL"}}
+{"v":1,"kind":"query","id":"<uuid>","prompt":"...","cwd":"...","env":{"KEY":"VAL"},"systemContext":"..."}
 {"v":1,"kind":"abort","id":"<uuid>"}
 {"v":1,"kind":"shutdown"}
 ```
@@ -41,6 +41,13 @@ envelope has been received.
   already spawned there).
 - `env` — optional extra env for the bridge process. Already applied at spawn
   time by the host; passed through for parity with Claude's nodeConfig.
+- `systemContext` — optional string. When present, the bridge prepends it to
+  the user prompt under an `[Archon context]` header before invoking
+  `agent.run_stream_events()`. Carries the node-level `systemPrompt` plus
+  folded `resolvedSkills` / `resolvedAgents` from the SkillAgentRegistry so
+  Pydantic nodes receive the same skill/agent context as Claude / OpenCode /
+  LiteLLM. User agents remain free to inspect and reshape before model
+  invocation (they control the agent instance).
 
 ### Bridge → Host
 
