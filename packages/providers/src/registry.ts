@@ -16,6 +16,8 @@ import type {
 } from './types';
 import { ClaudeProvider } from './claude/provider';
 import { CLAUDE_CAPABILITIES } from './claude/capabilities';
+import { OpenCodeProvider } from './opencode/provider';
+import { OPENCODE_CAPABILITIES } from './opencode/capabilities';
 import { UnknownProviderError } from './errors';
 import { createLogger } from '@archon/paths';
 
@@ -113,6 +115,24 @@ export function registerBuiltinProviders(): void {
       isModelCompatible: (model: string): boolean => {
         const aliases = ['sonnet', 'opus', 'haiku'];
         return aliases.includes(model) || model.startsWith('claude-') || model === 'inherit';
+      },
+      builtIn: true,
+    },
+    {
+      id: 'opencode',
+      displayName: 'OpenCode',
+      factory: () => new OpenCodeProvider(),
+      capabilities: OPENCODE_CAPABILITIES,
+      isModelCompatible: (model: string): boolean => {
+        // Explicit opencode/ prefix is the inference hint. Anthropic-native
+        // aliases (sonnet/opus/haiku) and bare claude-* stay reserved so the
+        // Claude provider wins by default. Otherwise we accept any
+        // `providerID/modelID` shape (OpenCode fronts many upstreams).
+        if (!model) return false;
+        if (model.startsWith('opencode/')) return true;
+        if (['sonnet', 'opus', 'haiku'].includes(model)) return false;
+        if (model.startsWith('claude-') || model === 'inherit') return false;
+        return /^[a-z][a-z0-9_-]*\/.+/i.test(model);
       },
       builtIn: true,
     },

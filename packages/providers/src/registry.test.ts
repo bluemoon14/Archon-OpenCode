@@ -165,21 +165,22 @@ describe('registry', () => {
   describe('getRegisteredProviders', () => {
     test('returns all registered providers', () => {
       const all = getRegisteredProviders();
-      expect(all.length).toBe(1);
+      expect(all.length).toBe(2);
       expect(all.map(r => r.id)).toContain('claude');
+      expect(all.map(r => r.id)).toContain('opencode');
     });
 
     test('includes additional providers after registration', () => {
       registerProvider(makeMockRegistration('my-llm'));
       const all = getRegisteredProviders();
-      expect(all.length).toBe(2);
+      expect(all.length).toBe(3);
     });
   });
 
   describe('getProviderInfoList', () => {
     test('returns API-safe projection without factory', () => {
       const infos = getProviderInfoList();
-      expect(infos.length).toBe(1);
+      expect(infos.length).toBe(2);
       for (const info of infos) {
         expect(info).toHaveProperty('id');
         expect(info).toHaveProperty('displayName');
@@ -207,7 +208,7 @@ describe('registry', () => {
       registerBuiltinProviders();
       registerBuiltinProviders();
       const all = getRegisteredProviders();
-      expect(all.length).toBe(1);
+      expect(all.length).toBe(2);
     });
   });
 
