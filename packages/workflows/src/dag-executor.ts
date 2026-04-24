@@ -608,7 +608,8 @@ async function executeNodeInternal(
   nodeOutputs: Map<string, NodeOutput>,
   resumeSessionId: string | undefined,
   configuredCommandFolder?: string,
-  issueContext?: string
+  issueContext?: string,
+  namedParams?: Record<string, string>
 ): Promise<NodeExecutionResult> {
   const nodeStartTime = Date.now();
   const nodeContext: SendMessageContext = { workflowId: workflowRun.id, nodeName: node.id };
@@ -687,7 +688,8 @@ async function executeNodeInternal(
       baseBranch,
       docsDir,
       issueContext,
-      `dag node '${node.id}' prompt`
+      `dag node '${node.id}' prompt`,
+      namedParams
     );
   } catch (error) {
     const err = error as Error;
@@ -1258,7 +1260,8 @@ async function executeBashNode(
   docsDir: string,
   nodeOutputs: Map<string, NodeOutput>,
   issueContext?: string,
-  envVars?: Record<string, string>
+  envVars?: Record<string, string>,
+  namedParams?: Record<string, string>
 ): Promise<NodeOutput> {
   const nodeStartTime = Date.now();
   const nodeContext: SendMessageContext = { workflowId: workflowRun.id, nodeName: node.id };
@@ -1296,7 +1299,10 @@ async function executeBashNode(
     artifactsDir,
     baseBranch,
     docsDir,
-    issueContext
+    issueContext,
+    undefined,
+    undefined,
+    namedParams
   );
   const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs, true);
 
@@ -1412,7 +1418,8 @@ async function executeScriptNode(
   docsDir: string,
   nodeOutputs: Map<string, NodeOutput>,
   issueContext?: string,
-  envVars?: Record<string, string>
+  envVars?: Record<string, string>,
+  namedParams?: Record<string, string>
 ): Promise<NodeOutput> {
   const nodeStartTime = Date.now();
   const nodeContext: SendMessageContext = { workflowId: workflowRun.id, nodeName: node.id };
@@ -1450,7 +1457,10 @@ async function executeScriptNode(
     artifactsDir,
     baseBranch,
     docsDir,
-    issueContext
+    issueContext,
+    undefined,
+    undefined,
+    namedParams
   );
   const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs, false);
 
@@ -1704,7 +1714,8 @@ async function executeLoopNode(
   nodeOutputs: Map<string, NodeOutput>,
   config: WorkflowConfig,
   issueContext?: string,
-  workflowLevelOptions?: WorkflowLevelOptions
+  workflowLevelOptions?: WorkflowLevelOptions,
+  namedParams?: Record<string, string>
 ): Promise<NodeExecutionResult> {
   const loop = node.loop;
   const msgContext = { workflowId: workflowRun.id, nodeName: node.id };
@@ -1814,7 +1825,9 @@ async function executeLoopNode(
         baseBranch,
         docsDir,
         issueContext,
-        i === startIteration ? loopUserInput : ''
+        i === startIteration ? loopUserInput : '',
+        undefined,
+        namedParams
       );
       const finalPrompt = substituteNodeOutputRefs(substitutedPrompt, nodeOutputs);
 
@@ -2034,7 +2047,10 @@ async function executeLoopNode(
           artifactsDir,
           baseBranch,
           docsDir,
-          issueContext
+          issueContext,
+          undefined,
+          undefined,
+          namedParams
         );
         const substitutedBash = substituteNodeOutputRefs(
           bashPrompt,
@@ -2228,7 +2244,8 @@ async function executeApprovalNode(
   config: WorkflowConfig,
   workflowLevelOptions: WorkflowLevelOptions,
   configuredCommandFolder?: string,
-  issueContext?: string
+  issueContext?: string,
+  namedParams?: Record<string, string>
 ): Promise<NodeOutput> {
   const msgContext = { workflowId: workflowRun.id, nodeName: node.id };
 
@@ -2286,7 +2303,8 @@ async function executeApprovalNode(
       docsDir,
       issueContext,
       undefined, // loopUserInput
-      rejectionReason
+      rejectionReason,
+      namedParams
     );
 
     // Build a synthetic PromptNode to reuse executeNodeInternal
@@ -2326,7 +2344,8 @@ async function executeApprovalNode(
       nodeOutputs,
       undefined, // fresh session
       configuredCommandFolder,
-      issueContext
+      issueContext,
+      namedParams
     );
 
     if (output.state === 'failed') {
@@ -2386,7 +2405,20 @@ export async function executeDagWorkflow(
   platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
-  workflow: { name: string; nodes: readonly DagNode[] } & WorkflowLevelOptions,
+  workflow: {
+    name: string;
+    nodes: readonly DagNode[];
+    /** Whole-workflow cost cap in USD. Runs fail mid-flight when the running total exceeds this. */
+    maxWorkflowCostUsd?: number;
+    /**
+     * Resolved named parameter map keyed by parameter name. Populated at
+     * workflow load/invoke time by merging `workflow.parameters.*.default`
+     * with any CLI `--param name=value` overrides. Any `$PARAM_<name>`
+     * reference in a node's prompt / bash / script resolves to the value
+     * here; unknown references resolve to empty string.
+     */
+    namedParams?: Record<string, string>;
+  } & WorkflowLevelOptions,
   workflowRun: WorkflowRun,
   workflowProvider: string,
   workflowModel: string | undefined,
@@ -2618,7 +2650,8 @@ export async function executeDagWorkflow(
               docsDir,
               nodeOutputs,
               issueContext,
-              config.envVars
+              config.envVars,
+              workflow.namedParams
             );
             return { nodeId: node.id, output };
           }
@@ -2662,7 +2695,8 @@ export async function executeDagWorkflow(
               nodeOutputs,
               config,
               issueContext,
-              workflowLevelOptions
+              workflowLevelOptions,
+              workflow.namedParams
             );
             return { nodeId: node.id, output };
           }
@@ -2686,7 +2720,8 @@ export async function executeDagWorkflow(
               config,
               workflowLevelOptions,
               configuredCommandFolder,
-              issueContext
+              issueContext,
+              workflow.namedParams
             );
             return { nodeId: node.id, output };
           }
@@ -2738,7 +2773,8 @@ export async function executeDagWorkflow(
               docsDir,
               nodeOutputs,
               issueContext,
-              config.envVars
+              config.envVars,
+              workflow.namedParams
             );
             return { nodeId: node.id, output };
           }
@@ -2793,7 +2829,8 @@ export async function executeDagWorkflow(
               // ensures the source is never mutated, so retries can safely resume from it.
               resumeSessionId,
               configuredCommandFolder,
-              issueContext
+              issueContext,
+              workflow.namedParams
             );
 
             if (output.state !== 'failed') break;
@@ -2896,6 +2933,40 @@ export async function executeDagWorkflow(
 
     if (layerHadFailure) {
       getLog().warn({ layerIdx, nodeCount: layer.length }, 'dag_layer_had_failures');
+    }
+
+    // Persist the running cost total + enforce the whole-workflow budget cap
+    // between layers. Storing per-layer (not per-node) keeps DB write volume
+    // proportional to DAG depth rather than node count, which matters for
+    // wide fan-out layers.
+    if (totalCostUsd > 0) {
+      try {
+        await deps.store.updateWorkflowRunCost(workflowRun.id, totalCostUsd);
+      } catch (err) {
+        // Non-fatal — cost is observational. Log and continue; the cap
+        // check below still uses the in-memory running total.
+        getLog().warn(
+          { err: err as Error, workflowRunId: workflowRun.id, totalCostUsd },
+          'dag.workflow_run_cost_update_failed'
+        );
+      }
+    }
+    if (workflow.maxWorkflowCostUsd !== undefined && totalCostUsd > workflow.maxWorkflowCostUsd) {
+      const msg =
+        `Workflow cost cap exceeded: spent $${totalCostUsd.toFixed(4)} vs cap ` +
+        `$${workflow.maxWorkflowCostUsd.toFixed(4)} after layer ${String(layerIdx)}.`;
+      getLog().error(
+        {
+          workflowRunId: workflowRun.id,
+          totalCostUsd,
+          cap: workflow.maxWorkflowCostUsd,
+          layerIdx,
+        },
+        'dag.workflow_cost_cap_exceeded'
+      );
+      await deps.store.failWorkflowRun(workflowRun.id, msg);
+      await safeSendMessage(platform, conversationId, msg, { workflowId: workflowRun.id });
+      throw new Error(msg);
     }
 
     // Check for non-running status between DAG layers (cancellation, deletion, pause)

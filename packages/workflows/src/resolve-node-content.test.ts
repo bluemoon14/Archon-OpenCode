@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ResolvedAgent, ResolvedSkill } from './schemas';
 import type { SkillAgentRegistry } from './deps';
-import { resolveNodeContent } from './resolve-node-content';
+import { resolveNodeContent, topologicalSortSkills } from './resolve-node-content';
 import { SkillNotFoundError } from './skills/loader';
 import { AgentNotFoundError } from './agents/loader';
 
@@ -27,6 +27,9 @@ function makeRegistry(params: {
         source: s.source ?? 'bundled',
         ...(s.model !== undefined ? { model: s.model } : {}),
         ...(s.path !== undefined ? { path: s.path } : {}),
+        ...(s.tags !== undefined ? { tags: s.tags } : {}),
+        ...(s.requires !== undefined ? { requires: s.requires } : {}),
+        ...(s.examples !== undefined ? { examples: s.examples } : {}),
       };
     },
     listSkills: async () => Object.keys(skills).map(name => ({ name, source: 'bundled' as const })),
@@ -216,5 +219,102 @@ describe('resolveNodeContent — error bubble semantics', () => {
         defaultAssistantModel: 'sonnet',
       })
     ).rejects.toThrow(/EACCES/);
+  });
+});
+
+describe('resolveNodeContent — skill ordering via requires', () => {
+  test('orders skills so requires-targets run first (deps-first)', async () => {
+    const registry = makeRegistry({
+      skills: {
+        a: { requires: ['b'] },
+        b: {},
+      } as Record<string, Partial<ResolvedSkill>>,
+    });
+    const out = await resolveNodeContent({
+      skills: ['a', 'b'],
+      registry,
+      defaultAssistantModel: 'sonnet',
+    });
+    expect(out.resolvedSkills.map(s => s.name)).toEqual(['b', 'a']);
+  });
+
+  test('auto-appends a required skill that the user did not list', async () => {
+    const registry = makeRegistry({
+      skills: {
+        caller: { requires: ['helper'] },
+        helper: {},
+      } as Record<string, Partial<ResolvedSkill>>,
+    });
+    const out = await resolveNodeContent({
+      skills: ['caller'],
+      registry,
+      defaultAssistantModel: 'sonnet',
+    });
+    expect(out.resolvedSkills.map(s => s.name)).toEqual(['helper', 'caller']);
+  });
+
+  test('throws on a requires cycle', async () => {
+    const registry = makeRegistry({
+      skills: {
+        alpha: { requires: ['beta'] },
+        beta: { requires: ['alpha'] },
+      } as Record<string, Partial<ResolvedSkill>>,
+    });
+    await expect(
+      resolveNodeContent({
+        skills: ['alpha'],
+        registry,
+        defaultAssistantModel: 'sonnet',
+      })
+    ).rejects.toThrow(/requires cycle detected/);
+  });
+
+  test('tolerates requires pointing at a missing skill (best-effort)', async () => {
+    const registry = makeRegistry({
+      skills: {
+        // `solo` requires `ghost` which isn't in the registry; solo still resolves.
+        solo: { requires: ['ghost'] },
+      } as Record<string, Partial<ResolvedSkill>>,
+    });
+    const out = await resolveNodeContent({
+      skills: ['solo'],
+      registry,
+      defaultAssistantModel: 'sonnet',
+    });
+    expect(out.resolvedSkills.map(s => s.name)).toEqual(['solo']);
+  });
+});
+
+describe('topologicalSortSkills — pure helper', () => {
+  function skill(name: string, requires: string[] = []): ResolvedSkill {
+    return {
+      name,
+      description: 'x',
+      body: 'body',
+      source: 'bundled',
+      requires,
+    };
+  }
+
+  test('returns empty for empty input', () => {
+    expect(topologicalSortSkills(new Map())).toEqual([]);
+  });
+
+  test('preserves insertion order when there are no requires edges', () => {
+    const m = new Map<string, ResolvedSkill>([
+      ['a', skill('a')],
+      ['b', skill('b')],
+      ['c', skill('c')],
+    ]);
+    expect(topologicalSortSkills(m)).toEqual(['a', 'b', 'c']);
+  });
+
+  test('throws with a readable chain on cycle', () => {
+    const m = new Map<string, ResolvedSkill>([
+      ['a', skill('a', ['b'])],
+      ['b', skill('b', ['c'])],
+      ['c', skill('c', ['a'])],
+    ]);
+    expect(() => topologicalSortSkills(m)).toThrow(/requires cycle/);
   });
 });

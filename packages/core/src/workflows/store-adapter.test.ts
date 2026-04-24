@@ -10,6 +10,7 @@ const mockFindResumableRun = mock(() => Promise.resolve(null));
 const mockResumeWorkflowRun = mock(() => Promise.resolve({ id: 'run-1' }));
 const mockUpdateWorkflowRun = mock(() => Promise.resolve());
 const mockUpdateWorkflowActivity = mock(() => Promise.resolve());
+const mockUpdateWorkflowRunCost = mock(() => Promise.resolve());
 const mockGetWorkflowRunStatus = mock(() => Promise.resolve('running'));
 const mockCompleteWorkflowRun = mock(() => Promise.resolve());
 const mockFailWorkflowRun = mock(() => Promise.resolve());
@@ -25,6 +26,7 @@ mock.module('../db/workflows', () => ({
   resumeWorkflowRun: mockResumeWorkflowRun,
   updateWorkflowRun: mockUpdateWorkflowRun,
   updateWorkflowActivity: mockUpdateWorkflowActivity,
+  updateWorkflowRunCost: mockUpdateWorkflowRunCost,
   getWorkflowRunStatus: mockGetWorkflowRunStatus,
   completeWorkflowRun: mockCompleteWorkflowRun,
   failWorkflowRun: mockFailWorkflowRun,
@@ -66,6 +68,7 @@ describe('createWorkflowStore', () => {
       'resumeWorkflowRun',
       'updateWorkflowRun',
       'updateWorkflowActivity',
+      'updateWorkflowRunCost',
       'getWorkflowRunStatus',
       'completeWorkflowRun',
       'failWorkflowRun',
