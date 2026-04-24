@@ -87,6 +87,7 @@ function createMockStore(): IWorkflowStore {
     ),
     updateWorkflowRun: mock(() => Promise.resolve()),
     updateWorkflowActivity: mock(() => Promise.resolve()),
+    updateWorkflowRunCost: mock(() => Promise.resolve()),
     getWorkflowRunStatus: mock(() => Promise.resolve('running' as const)),
     completeWorkflowRun: mock(() => Promise.resolve()),
     failWorkflowRun: mock(() => Promise.resolve()),
@@ -5732,5 +5733,141 @@ describe('shouldContinueStreamingForStatus', () => {
     const { shouldContinueStreamingForStatus } = await import('./dag-executor');
     expect(shouldContinueStreamingForStatus('pending')).toBe(false);
     expect(shouldContinueStreamingForStatus('invalid-status')).toBe(false);
+  });
+});
+
+describe('executeDagWorkflow -- maxWorkflowCostUsd (whole-workflow budget cap)', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-budget-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(join(testDir, '.archon', 'commands'), { recursive: true });
+    await writeFile(join(testDir, '.archon', 'commands', 'expensive.md'), 'Expensive prompt');
+    mockSendQueryDag.mockClear();
+  });
+
+  afterEach(async () => {
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('persists total cost via updateWorkflowRunCost after every layer', async () => {
+    // Each node reports $0.01; 2-layer DAG of 2 nodes = $0.02 total.
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'ok' };
+      yield { type: 'result', sessionId: 'sess', cost: 0.01 };
+    });
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-budget-ok',
+      testDir,
+      {
+        name: 'budget-ok',
+        nodes: [
+          { id: 'a', command: 'expensive' },
+          { id: 'b', command: 'expensive', depends_on: ['a'] },
+        ],
+        maxWorkflowCostUsd: 1.0,
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      'docs/',
+      minimalConfig
+    );
+
+    const calls = (store.updateWorkflowRunCost as Mock<typeof store.updateWorkflowRunCost>).mock
+      .calls;
+    // Two layers → two cost updates ($0.01 after layer 0, $0.02 after layer 1).
+    expect(calls.length).toBe(2);
+    expect(calls[0][1]).toBeCloseTo(0.01, 4);
+    expect(calls[1][1]).toBeCloseTo(0.02, 4);
+  });
+
+  it('fails the run when totalCostUsd exceeds the cap mid-flight', async () => {
+    // Each node is $0.05. Cap is $0.08. First layer brings us to $0.05 (ok);
+    // second layer pushes to $0.10 → cap exceeded → failWorkflowRun + throw.
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'ok' };
+      yield { type: 'result', sessionId: 'sess', cost: 0.05 };
+    });
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await expect(
+      executeDagWorkflow(
+        mockDeps,
+        platform,
+        'conv-budget-bust',
+        testDir,
+        {
+          name: 'budget-bust',
+          nodes: [
+            { id: 'a', command: 'expensive' },
+            { id: 'b', command: 'expensive', depends_on: ['a'] },
+          ],
+          maxWorkflowCostUsd: 0.08,
+        },
+        workflowRun,
+        'claude',
+        undefined,
+        join(testDir, 'artifacts'),
+        join(testDir, 'logs'),
+        'main',
+        'docs/',
+        minimalConfig
+      )
+    ).rejects.toThrow(/cost cap exceeded/i);
+
+    const failCalls = (store.failWorkflowRun as Mock<typeof store.failWorkflowRun>).mock.calls;
+    expect(failCalls.length).toBe(1);
+    expect(failCalls[0][1]).toMatch(/cost cap exceeded/i);
+  });
+
+  it('does not enforce a cap when maxWorkflowCostUsd is undefined', async () => {
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'result', sessionId: 'sess', cost: 1000 }; // huge cost
+    });
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-budget-none',
+      testDir,
+      {
+        name: 'budget-none',
+        nodes: [{ id: 'a', command: 'expensive' }],
+        // no maxWorkflowCostUsd
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      'docs/',
+      minimalConfig
+    );
+
+    const failCalls = (store.failWorkflowRun as Mock<typeof store.failWorkflowRun>).mock.calls;
+    expect(failCalls.length).toBe(0);
   });
 });

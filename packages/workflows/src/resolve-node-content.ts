@@ -19,6 +19,7 @@ import { resolveAgentModel, resolveSkillModel } from './model-resolution';
 import type { SkillAgentRegistry } from './deps';
 import { SkillNotFoundError } from './skills/loader';
 import { AgentNotFoundError } from './agents/loader';
+import type { ResolvedSkill } from './schemas/skills';
 
 let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
@@ -52,36 +53,39 @@ export async function resolveNodeContent(
   const resolvedAgents: ResolvedAgentHandoff[] = [];
 
   if (input.skills) {
-    for (const name of input.skills) {
+    // Pass 1 — load every requested skill, closure-over its `requires:` edges.
+    // Skills absent from the registry are recorded but contribute no edges
+    // (their requires list is unknown). Skills we auto-append because another
+    // skill required them also go through this loader path so their own
+    // requires transitively chain.
+    const loaded = new Map<string, ResolvedSkill>();
+    const missing = new Set<string>();
+    const pending = [...input.skills];
+    while (pending.length > 0) {
+      // pending.length > 0 guarantees shift() returns a string, but TS can't
+      // prove it — narrow explicitly instead of using `!`.
+      const name = pending.shift();
+      if (name === undefined) continue;
+      if (loaded.has(name) || missing.has(name)) continue;
       try {
         const skill = await input.registry.loadSkill(name);
-        const resolved = resolveSkillModel({
-          skillName: name,
-          bundled: files.bundled,
-          global: files.global,
-          project: files.project,
-          frontmatter: skill.model,
-          ownerNodeModel: input.nodeModel,
-          defaultAssistantModel: input.defaultAssistantModel,
-        });
-        resolvedSkills.push({
-          name: skill.name,
-          description: skill.description,
-          body: skill.body,
-          model: resolved.model,
-        });
-        getLog().debug(
-          {
-            skill: skill.name,
-            source: skill.source,
-            modelSource: resolved.source,
-            model: resolved.model,
-          },
-          'skills.resolved'
-        );
+        loaded.set(name, skill);
+        for (const req of skill.requires ?? []) {
+          if (!loaded.has(req) && !missing.has(req) && !pending.includes(req)) {
+            // Auto-append — warn if the user didn't list it explicitly so
+            // implicit dependencies show up in logs without breaking.
+            if (!input.skills.includes(req)) {
+              getLog().warn(
+                { skill: name, auto_added: req },
+                'skills.auto_added_required_dependency'
+              );
+            }
+            pending.push(req);
+          }
+        }
       } catch (err) {
         if (err instanceof SkillNotFoundError) {
-          // Skill not in registry — provider falls back to nodeConfig.skills pass-through.
+          missing.add(name);
           getLog().debug({ skill: name }, 'skills.not_in_registry');
           continue;
         }
@@ -89,6 +93,41 @@ export async function resolveNodeContent(
         // must surface — swallowing these masks real bugs.
         throw err;
       }
+    }
+
+    // Pass 2 — topological sort on the loaded subgraph. `requires` edges
+    // mean "this skill must run after its deps," so sorted order goes
+    // deps-first. Cycles throw with the offending chain in the message.
+    const orderedNames = topologicalSortSkills(loaded);
+
+    // Pass 3 — resolve model + emit ResolvedSkillHandoff in dependency order.
+    for (const name of orderedNames) {
+      const skill = loaded.get(name);
+      if (skill === undefined) continue; // unreachable: orderedNames ⊆ loaded.keys()
+      const resolved = resolveSkillModel({
+        skillName: name,
+        bundled: files.bundled,
+        global: files.global,
+        project: files.project,
+        frontmatter: skill.model,
+        ownerNodeModel: input.nodeModel,
+        defaultAssistantModel: input.defaultAssistantModel,
+      });
+      resolvedSkills.push({
+        name: skill.name,
+        description: skill.description,
+        body: skill.body,
+        model: resolved.model,
+      });
+      getLog().debug(
+        {
+          skill: skill.name,
+          source: skill.source,
+          modelSource: resolved.source,
+          model: resolved.model,
+        },
+        'skills.resolved'
+      );
     }
   }
 
@@ -142,4 +181,47 @@ export async function resolveNodeContent(
   }
 
   return { resolvedSkills, resolvedAgents };
+}
+
+// ---------------------------------------------------------------------------
+// Skill ordering via `requires`
+// ---------------------------------------------------------------------------
+
+/**
+ * Topologically sort a set of loaded skills so that every skill appears
+ * after the skills it requires (DFS-based Kahn's algorithm variant).
+ *
+ * Only edges *within the provided set* are honored — if skill A requires
+ * B and B isn't in the input map, A sorts against its other deps only.
+ * This keeps resolution graceful when a `requires` entry points at a
+ * skill that the registry doesn't have.
+ *
+ * Throws when a cycle is detected, with the offending chain in the message
+ * so the user can find and fix the edge.
+ */
+export function topologicalSortSkills(loaded: Map<string, ResolvedSkill>): string[] {
+  const result: string[] = [];
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+
+  function visit(name: string, path: string[]): void {
+    if (visited.has(name)) return;
+    if (visiting.has(name)) {
+      const cycle = [...path.slice(path.indexOf(name)), name];
+      throw new Error(`Skill requires cycle detected: ${cycle.join(' → ')}`);
+    }
+    const skill = loaded.get(name);
+    if (skill === undefined) return; // not loaded — skip (missing deps don't block)
+    visiting.add(name);
+    for (const dep of skill.requires ?? []) {
+      visit(dep, [...path, name]);
+    }
+    visiting.delete(name);
+    visited.add(name);
+    result.push(name);
+  }
+
+  // Iterate in insertion order so the output is stable for callers.
+  for (const name of loaded.keys()) visit(name, []);
+  return result;
 }

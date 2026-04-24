@@ -35,6 +35,7 @@ export function createWorkflowStore(): IWorkflowStore {
     resumeWorkflowRun: workflowDb.resumeWorkflowRun,
     updateWorkflowRun: workflowDb.updateWorkflowRun,
     updateWorkflowActivity: workflowDb.updateWorkflowActivity,
+    updateWorkflowRunCost: workflowDb.updateWorkflowRunCost,
     // DB returns string | null; IWorkflowStore declares WorkflowRunStatus | null.
     // The remote_agent_workflow_runs.status column is constrained to valid enum values
     // in SQL, so this cast is safe as long as the column constraint matches WorkflowRunStatus.

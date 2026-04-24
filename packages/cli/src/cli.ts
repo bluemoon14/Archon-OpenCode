@@ -135,6 +135,7 @@ Options:
   --json                     Output machine-readable JSON (for workflow list)
   --workflow <name>          Workflow to run for 'continue' (default: archon-assist)
   --no-context               Skip context injection for 'continue'
+  --param <key=value>        Set a workflow named parameter (repeatable; matches "parameters:" in the YAML)
 
 Examples:
   archon chat "What does the orchestrator do?"
@@ -269,6 +270,8 @@ async function main(): Promise<number> {
         'no-context': { type: 'boolean' },
         scope: { type: 'string' },
         force: { type: 'boolean' },
+        // Workflow named parameters — repeatable: `--param key=value` per flag.
+        param: { type: 'string', multiple: true },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -417,6 +420,18 @@ async function main(): Promise<number> {
               );
               return 1;
             }
+            const rawParams = values.param as string[] | undefined;
+            let params: Record<string, string> | undefined;
+            if (rawParams !== undefined && rawParams.length > 0) {
+              try {
+                const { parseCliParamFlags } =
+                  await import('@archon/workflows/workflow-parameters');
+                params = parseCliParamFlags(rawParams);
+              } catch (err) {
+                console.error(err instanceof Error ? err.message : String(err));
+                return 1;
+              }
+            }
             const options = {
               branchName,
               fromBranch,
@@ -424,6 +439,7 @@ async function main(): Promise<number> {
               resume: resumeFlag,
               quiet: values.quiet as boolean | undefined,
               verbose: values.verbose as boolean | undefined,
+              ...(params !== undefined ? { params } : {}),
             };
             await workflowRunCommand(effectiveCwd, workflowName, userMessage, options);
             break;

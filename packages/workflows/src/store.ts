@@ -71,6 +71,13 @@ export interface IWorkflowStore {
     updates: Partial<Pick<WorkflowRun, 'status' | 'metadata'>>
   ): Promise<void>;
   updateWorkflowActivity(id: string): Promise<void>;
+  /**
+   * Persist the running cost total for a workflow run. Called after every
+   * node that reports a `cost_usd`. Idempotent in the sense that a later
+   * higher value always wins — downstream readers should treat the field
+   * as monotonically increasing per-run.
+   */
+  updateWorkflowRunCost(id: string, totalCostUsd: number): Promise<void>;
   getWorkflowRunStatus(id: string): Promise<WorkflowRunStatus | null>;
   completeWorkflowRun(id: string, metadata?: Record<string, unknown>): Promise<void>;
   failWorkflowRun(id: string, error: string): Promise<void>;
