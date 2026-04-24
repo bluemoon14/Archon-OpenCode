@@ -44,6 +44,8 @@ import {
   getArchonEnvPath as pathsGetArchonEnvPath,
   getRepoArchonEnvPath as pathsGetRepoArchonEnvPath,
 } from '@archon/paths';
+import { getSetupPlugins } from '../setup/registry';
+import type { SetupPluginResult } from '../setup/plugins';
 
 // =============================================================================
 // Types
@@ -63,6 +65,12 @@ interface SetupConfig {
     claudeBinaryPath?: string;
     defaultAssistant: string;
   };
+  /**
+   * Results collected from pluggable non-Claude AI runtime setup plugins
+   * (OpenCode, Pydantic AI). Keyed by plugin id. Claude stays in the `ai`
+   * field because its shape is locked in by existing tests.
+   */
+  providers?: Record<string, SetupPluginResult>;
   platforms: {
     github: boolean;
   };
@@ -447,6 +455,24 @@ async function collectAIConfig(): Promise<SetupConfig['ai']> {
 }
 
 /**
+ * Run each registered setup plugin (OpenCode, Pydantic AI). Plugins are
+ * independent — the user may skip any — so this only aggregates the
+ * non-null results into a provider-id-keyed map. Claude is handled
+ * separately by `collectAIConfig` because its config shape is locked in by
+ * existing tests.
+ */
+async function collectExtraProviders(): Promise<Record<string, SetupPluginResult>> {
+  const results: Record<string, SetupPluginResult> = {};
+  for (const plugin of getSetupPlugins()) {
+    log.info(`Configure ${plugin.displayName}? (optional — press n to skip)`);
+    const detection = plugin.detect();
+    const result = await plugin.collect(detection);
+    if (result) results[plugin.id] = result;
+  }
+  return results;
+}
+
+/**
  * Collect platform selection
  */
 async function collectPlatforms(): Promise<SetupConfig['platforms']> {
@@ -622,6 +648,18 @@ export function generateEnvContent(config: SetupConfig): string {
     lines.push('# Claude not configured');
   }
   lines.push('');
+
+  // Other AI runtimes (OpenCode, Pydantic AI) configured via setup plugins.
+  // Each plugin's envLines are appended here; secrets are never emitted by
+  // the plugins themselves (they record env-var NAMES, not values).
+  if (config.providers) {
+    for (const [id, result] of Object.entries(config.providers)) {
+      if (result.envLines.length === 0) continue;
+      lines.push(`# ${id}`);
+      for (const line of result.envLines) lines.push(line);
+      lines.push('');
+    }
+  }
 
   // Default AI Assistant
   lines.push('# Default AI Assistant');
@@ -1036,11 +1074,13 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
     // Fresh or update mode - collect everything
     const database = await collectDatabaseConfig();
     const ai = await collectAIConfig();
+    const providers = await collectExtraProviders();
     const platforms = await collectPlatforms();
 
     config = {
       database,
       ai,
+      providers: Object.keys(providers).length > 0 ? providers : undefined,
       platforms,
       botDisplayName: 'Archon',
     };
@@ -1088,6 +1128,24 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
   }
   if (writeResult.backupPath) {
     log.info(`Backup written to ${writeResult.backupPath}`);
+  }
+
+  // Surface post-setup notes and config snippets from each plugin. Config
+  // snippets are printed (not written) so the user retains full control of
+  // their .archon/config.yaml — per the plan's "no silent repo mutations"
+  // rule for BYO runtimes.
+  if (config.providers) {
+    for (const [id, result] of Object.entries(config.providers)) {
+      if (result.postNote) {
+        note(result.postNote.body, result.postNote.title);
+      }
+      if (result.configSnippet) {
+        note(
+          `Add to .archon/config.yaml (in this repo or ~/.archon/config.yaml):\n\n${result.configSnippet}`,
+          `${id} — .archon/config.yaml snippet`
+        );
+      }
+    }
   }
 
   // Offer to install the Archon skill

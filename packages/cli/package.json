@@ -8,7 +8,7 @@
   },
   "scripts": {
     "cli": "bun src/cli.ts",
-    "test": "bun test src/commands/version.test.ts src/commands/setup.test.ts && bun test src/commands/workflow.test.ts && bun test src/commands/isolation.test.ts && bun test src/commands/chat.test.ts && bun test src/sentry/init.test.ts",
+    "test": "bun test src/commands/version.test.ts src/commands/setup.test.ts src/setup/plugins/opencode.test.ts src/setup/plugins/pydantic.test.ts src/setup/registry.test.ts && bun test src/commands/workflow.test.ts && bun test src/commands/isolation.test.ts && bun test src/commands/chat.test.ts && bun test src/sentry/init.test.ts",
     "type-check": "bun x tsc --noEmit"
   },
   "dependencies": {
