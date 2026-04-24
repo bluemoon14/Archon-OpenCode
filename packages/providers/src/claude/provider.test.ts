@@ -1290,4 +1290,164 @@ describe('sendQuery decomposition behaviors', () => {
       expect(warnCalls).toHaveLength(0);
     });
   });
+
+  describe('resolvedSkills (Archon SkillAgentRegistry pre-loaded)', () => {
+    test('injects resolved skill bodies into agent prompt (bypasses SDK skill lookup)', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid' };
+      });
+
+      for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+        nodeConfig: { skills: ['systematic-debugging'] },
+        resolvedSkills: [
+          {
+            name: 'systematic-debugging',
+            description: 'Use when stuck',
+            body: 'the debugging playbook body',
+            model: 'anthropic/claude-opus-4-5',
+          },
+        ],
+      })) {
+        // consume
+      }
+
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      const agents = callArgs.options.agents as Record<
+        string,
+        { prompt: string; skills?: unknown; model?: string }
+      >;
+      const wrapper = agents['dag-node-skills'];
+      expect(wrapper).toBeDefined();
+      expect(wrapper.prompt).toContain('systematic-debugging');
+      expect(wrapper.prompt).toContain('the debugging playbook body');
+      // Resolved path should NOT pass skills: [] to the SDK — bodies are inline.
+      expect(wrapper.skills).toBeUndefined();
+      expect(wrapper.model).toBe('anthropic/claude-opus-4-5');
+    });
+
+    test('falls back to SDK skill lookup when resolvedSkills is absent', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid' };
+      });
+
+      for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+        nodeConfig: { skills: ['user-authored-skill'] },
+      })) {
+        // consume
+      }
+
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      const agents = callArgs.options.agents as Record<
+        string,
+        { prompt: string; skills?: string[] }
+      >;
+      // Without resolved content, the legacy path passes skill names via skills: [].
+      expect(agents['dag-node-skills'].skills).toEqual(['user-authored-skill']);
+    });
+
+    test('mixed-model resolved skills fall back to node model with warning', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid' };
+      });
+
+      for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+        model: 'sonnet',
+        nodeConfig: { skills: ['a', 'b'] },
+        resolvedSkills: [
+          { name: 'a', description: 'd', body: 'body-a', model: 'anthropic/claude-haiku-4-5' },
+          { name: 'b', description: 'd', body: 'body-b', model: 'anthropic/claude-opus-4-5' },
+        ],
+      })) {
+        // consume
+      }
+
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      const wrapper = (callArgs.options.agents as Record<string, { model?: string }>)[
+        'dag-node-skills'
+      ];
+      expect(wrapper.model).toBe('sonnet');
+      const warnCalls = mockLogger.warn.mock.calls.filter(
+        (args: unknown[]) => args[1] === 'claude.resolved_skills_mixed_models_using_node_model'
+      );
+      expect(warnCalls.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('resolvedAgents (Archon SkillAgentRegistry + inline merge)', () => {
+    test('installs resolved agents into options.agents with merged content', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid' };
+      });
+
+      for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+        nodeConfig: { agents: { 'code-reviewer': { description: 'd', prompt: 'p' } } },
+        resolvedAgents: [
+          {
+            id: 'code-reviewer',
+            description: 'merged description',
+            prompt: 'merged prompt body',
+            model: 'anthropic/claude-opus-4-5',
+            tools: ['Read', 'Grep'],
+          },
+        ],
+      })) {
+        // consume
+      }
+
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      const agents = callArgs.options.agents as Record<string, Record<string, unknown>>;
+      expect(agents['code-reviewer']).toMatchObject({
+        description: 'merged description',
+        prompt: 'merged prompt body',
+        model: 'anthropic/claude-opus-4-5',
+        tools: ['Read', 'Grep'],
+      });
+    });
+
+    test('resolved agent id in nodeConfig.agents is NOT overwritten by the raw inline stub', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid' };
+      });
+
+      for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+        nodeConfig: { agents: { resolved: { description: 'stub', prompt: '' } } },
+        resolvedAgents: [
+          { id: 'resolved', description: 'merged', prompt: 'real body', model: 'opus' },
+        ],
+      })) {
+        // consume
+      }
+
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      const agents = callArgs.options.agents as Record<string, Record<string, unknown>>;
+      expect(agents.resolved.prompt).toBe('real body');
+      expect(agents.resolved.description).toBe('merged');
+    });
+
+    test('inline-only agents (not in resolved) still pass through', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid' };
+      });
+
+      for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+        nodeConfig: {
+          agents: {
+            registered: { description: 'stub', prompt: '' },
+            inline_only: { description: 'user', prompt: 'user prompt' },
+          },
+        },
+        resolvedAgents: [
+          { id: 'registered', description: 'from registry', prompt: 'registry body', model: 'o' },
+        ],
+      })) {
+        // consume
+      }
+
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      const agents = callArgs.options.agents as Record<string, Record<string, unknown>>;
+      expect(Object.keys(agents).sort()).toEqual(['inline_only', 'registered']);
+      expect(agents.registered.prompt).toBe('registry body');
+      expect(agents.inline_only.prompt).toBe('user prompt');
+    });
+  });
 });

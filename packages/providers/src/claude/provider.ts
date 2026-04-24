@@ -31,6 +31,8 @@ import type {
   TokenUsage,
   ProviderCapabilities,
   NodeConfig,
+  ResolvedSkillHandoff,
+  ResolvedAgentHandoff,
 } from '../types';
 import { parseClaudeConfig } from './config';
 import { CLAUDE_CAPABILITIES } from './capabilities';
@@ -354,6 +356,17 @@ interface ProviderWarning {
 // ─── NodeConfig → SDK Options Translation ──────────────────────────────────
 
 /**
+ * Extra content pre-resolved by Archon's SkillAgentRegistry. When present,
+ * these bodies are injected into the Claude SDK agent slot directly — bypasses
+ * the SDK's own skill-lookup path so bundled superpowers content (which isn't
+ * installed in `~/.claude/skills/`) works.
+ */
+export interface ResolvedContent {
+  resolvedSkills?: ResolvedSkillHandoff[];
+  resolvedAgents?: ResolvedAgentHandoff[];
+}
+
+/**
  * Translate nodeConfig into Claude SDK-specific options.
  * Called inside sendQuery when nodeConfig is present (workflow path).
  * Returns structured warnings that the caller should yield as system chunks.
@@ -361,7 +374,8 @@ interface ProviderWarning {
 async function applyNodeConfig(
   options: Options,
   nodeConfig: NodeConfig,
-  cwd: string
+  cwd: string,
+  resolved: ResolvedContent = {}
 ): Promise<ProviderWarning[]> {
   const warnings: ProviderWarning[] = [];
   // allowed_tools → tools
@@ -429,7 +443,56 @@ async function applyNodeConfig(
   }
 
   // skills → AgentDefinition wrapping
-  if (nodeConfig.skills) {
+  //
+  // Two paths:
+  //   (a) resolved.resolvedSkills present — Archon's SkillAgentRegistry has
+  //       pre-loaded the skill bodies. Inject them into the agent's prompt
+  //       directly; the SDK does not need to look skills up via its Skill tool.
+  //       This is how bundled superpowers content (not installed in
+  //       `~/.claude/skills/`) reaches Claude SDK.
+  //   (b) resolved.resolvedSkills empty/absent — fall back to passing skill
+  //       names to the SDK, which resolves them through `settingSources` and
+  //       the native `~/.claude/skills/` path. Preserves user-authored skills.
+  const resolvedSkills = resolved.resolvedSkills;
+  if (resolvedSkills !== undefined && resolvedSkills.length > 0) {
+    const agentId = 'dag-node-skills';
+    const agentTools = options.tools ? [...(options.tools as string[]), 'Skill'] : ['Skill'];
+    const skillsBlock = resolvedSkills
+      .map(s => `## Skill: ${s.name}\n\n${s.description}\n\n${s.body}`)
+      .join('\n\n---\n\n');
+    const agentDef: {
+      description: string;
+      prompt: string;
+      tools: string[];
+      model?: string;
+    } = {
+      description: 'DAG node with Archon-resolved skills',
+      prompt: `You have the following preloaded skills. Use them when relevant to the task:\n\n${skillsBlock}`,
+      tools: agentTools,
+    };
+    // Claude SDK supports one model per agent. If the resolved skills have
+    // differing models we fall back to the node's model; future work can
+    // group-by-model and create multiple agents.
+    const models = Array.from(new Set(resolvedSkills.map(s => s.model)));
+    if (models.length === 1) {
+      agentDef.model = models[0];
+    } else if (options.model) {
+      agentDef.model = options.model;
+      getLog().warn(
+        { skills: resolvedSkills.map(s => s.name), models },
+        'claude.resolved_skills_mixed_models_using_node_model'
+      );
+    }
+    options.agents = { [agentId]: agentDef };
+    options.agent = agentId;
+    if (!options.allowedTools?.includes('Skill')) {
+      options.allowedTools = [...(options.allowedTools ?? []), 'Skill'];
+    }
+    getLog().info(
+      { skills: resolvedSkills.map(s => s.name), agentId, source: 'registry' },
+      'claude.skills_agent_created'
+    );
+  } else if (nodeConfig.skills) {
     const skills = nodeConfig.skills;
     const agentId = 'dag-node-skills';
     const agentTools = options.tools ? [...(options.tools as string[]), 'Skill'] : ['Skill'];
@@ -451,14 +514,52 @@ async function applyNodeConfig(
     if (!options.allowedTools?.includes('Skill')) {
       options.allowedTools = [...(options.allowedTools ?? []), 'Skill'];
     }
-    getLog().info({ skills, agentId }, 'claude.skills_agent_created');
+    getLog().info({ skills, agentId, source: 'sdk' }, 'claude.skills_agent_created');
   }
 
-  // agents → inline AgentDefinition pass-through.
-  // Runs AFTER skills: so user-defined agents win on ID collision with
-  // the internal 'dag-node-skills' wrapper.
-  // options.agent is intentionally left alone — inline agents are sub-agents
-  // invokable via the Task tool, not the primary agent for the query.
+  // agents → inline AgentDefinition pass-through + Archon-resolved merges.
+  //
+  // Resolved agents (from SkillAgentRegistry via the DAG executor) already have
+  // their body + model + tools merged with any inline overrides from
+  // `nodeConfig.agents`. We install them into options.agents first. Any IDs in
+  // `nodeConfig.agents` that did NOT match a registry agent pass through
+  // afterwards — these are pure user inline definitions.
+  //
+  // Runs AFTER skills: so user-defined agents win on ID collision with the
+  // internal 'dag-node-skills' wrapper. options.agent is intentionally left
+  // alone — inline/resolved agents are sub-agents invokable via the Task tool,
+  // not the primary agent for the query.
+  const resolvedAgents = resolved.resolvedAgents;
+  const resolvedAgentIds = new Set<string>();
+  if (resolvedAgents !== undefined && resolvedAgents.length > 0) {
+    const agentsMap: NonNullable<Options['agents']> = options.agents ?? {};
+    for (const r of resolvedAgents) {
+      resolvedAgentIds.add(r.id);
+      const def: {
+        description: string;
+        prompt: string;
+        model?: string;
+        tools?: string[];
+        disallowedTools?: string[];
+        skills?: string[];
+        maxTurns?: number;
+      } = {
+        description: r.description,
+        prompt: r.prompt,
+      };
+      if (r.model) def.model = r.model;
+      if (r.tools) def.tools = r.tools;
+      if (r.disallowedTools) def.disallowedTools = r.disallowedTools;
+      if (r.skills) def.skills = r.skills;
+      if (r.maxTurns !== undefined) def.maxTurns = r.maxTurns;
+      agentsMap[r.id] = def;
+    }
+    options.agents = agentsMap;
+    getLog().info(
+      { agentIds: Array.from(resolvedAgentIds), source: 'registry' },
+      'claude.resolved_agents_registered'
+    );
+  }
   if (nodeConfig.agents) {
     // Warn loudly when a user-defined agent overrides the internal
     // 'dag-node-skills' wrapper set by the skills: block above. The
@@ -473,11 +574,23 @@ async function applyNodeConfig(
         'claude.inline_agents_override_skills_wrapper'
       );
     }
-    options.agents = {
-      ...(options.agents ?? {}),
-      ...(nodeConfig.agents as NonNullable<Options['agents']>),
-    };
-    getLog().info({ agentIds: Object.keys(nodeConfig.agents) }, 'claude.inline_agents_registered');
+    // Only spread the inline agents that weren't already resolved from the
+    // registry — otherwise the raw inline entries (which may be stubs
+    // referencing registry content) would clobber the merged resolution.
+    const inlineOnlyAgents: Record<string, unknown> = {};
+    for (const [id, def] of Object.entries(nodeConfig.agents)) {
+      if (!resolvedAgentIds.has(id)) inlineOnlyAgents[id] = def;
+    }
+    if (Object.keys(inlineOnlyAgents).length > 0) {
+      options.agents = {
+        ...(options.agents ?? {}),
+        ...(inlineOnlyAgents as NonNullable<Options['agents']>),
+      };
+      getLog().info(
+        { agentIds: Object.keys(inlineOnlyAgents), source: 'inline' },
+        'claude.inline_agents_registered'
+      );
+    }
   }
 
   // effort
@@ -932,9 +1045,18 @@ export class ClaudeProvider implements IAgentProvider {
     // then re-apply per attempt. But nodeConfig warnings are deterministic,
     // so we compute them once and yield them before the first attempt.
     let nodeConfigWarnings: ProviderWarning[] = [];
+    const resolvedContent: ResolvedContent = {
+      resolvedSkills: requestOptions?.resolvedSkills,
+      resolvedAgents: requestOptions?.resolvedAgents,
+    };
     if (requestOptions?.nodeConfig) {
       const tempOptions: Options = {} as Options;
-      nodeConfigWarnings = await applyNodeConfig(tempOptions, requestOptions.nodeConfig, cwd);
+      nodeConfigWarnings = await applyNodeConfig(
+        tempOptions,
+        requestOptions.nodeConfig,
+        cwd,
+        resolvedContent
+      );
     }
 
     // Yield provider warnings once before retries
@@ -976,7 +1098,7 @@ export class ClaudeProvider implements IAgentProvider {
 
       // 2. Apply nodeConfig translation (re-applied per attempt since options are fresh)
       if (requestOptions?.nodeConfig) {
-        await applyNodeConfig(options, requestOptions.nodeConfig, cwd);
+        await applyNodeConfig(options, requestOptions.nodeConfig, cwd, resolvedContent);
       }
 
       // 3. Set session resume

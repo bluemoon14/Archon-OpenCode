@@ -11,6 +11,8 @@ export type {
   ProviderInfo,
   MessageChunk,
   TokenUsage,
+  ResolvedSkillHandoff,
+  ResolvedAgentHandoff,
 } from './types';
 
 // Registry

@@ -185,6 +185,44 @@ export interface NodeConfig {
 }
 
 /**
+ * Skill content pre-loaded by Archon's SkillAgentRegistry and handed to the
+ * provider as a ready-to-use system-prompt contribution. Providers should
+ * inject `body` as instruction for the owning agent rather than expecting the
+ * underlying SDK to look up the skill by name. `model` is already resolved
+ * through the 8-tier precedence — no further resolution needed.
+ *
+ * When `resolvedSkills` is empty or absent, providers fall back to the raw
+ * `nodeConfig.skills: string[]` array (SDK-native lookup for Claude, no-op
+ * for OpenCode/Pydantic). This preserves back-compat with `~/.claude/skills/`.
+ */
+export interface ResolvedSkillHandoff {
+  name: string;
+  description: string;
+  body: string;
+  /** Final model string (LiteLLM canonical, Claude shorthand, or alias). */
+  model: string;
+}
+
+/**
+ * Agent content merged by the DAG executor from the SkillAgentRegistry +
+ * inline workflow-YAML override. Providers treat this as authoritative and
+ * install it in their SDK's agent slot. Inline overrides (from
+ * `nodeConfig.agents[id]`) have already won over registry defaults — no
+ * further merging on the provider side.
+ */
+export interface ResolvedAgentHandoff {
+  /** The key used under `nodeConfig.agents` — provider's SDK agent slot name. */
+  id: string;
+  description: string;
+  prompt: string;
+  model: string;
+  tools?: string[];
+  disallowedTools?: string[];
+  skills?: string[];
+  maxTurns?: number;
+}
+
+/**
  * Extended options for sendQuery, adding workflow-specific context.
  * The orchestrator path uses base AgentRequestOptions fields only.
  * The workflow path additionally passes nodeConfig and assistantConfig.
@@ -194,6 +232,14 @@ export interface SendQueryOptions extends AgentRequestOptions {
   nodeConfig?: NodeConfig;
   /** Per-provider defaults from .archon/config.yaml assistants section. */
   assistantConfig?: Record<string, unknown>;
+  /**
+   * Pre-resolved skill content from Archon's SkillAgentRegistry. When present,
+   * providers use these bodies directly instead of relying on SDK-side lookup.
+   * Populated by the DAG executor when a skill-agent registry is configured.
+   */
+  resolvedSkills?: ResolvedSkillHandoff[];
+  /** Pre-resolved agent content with registry defaults + inline overrides merged. */
+  resolvedAgents?: ResolvedAgentHandoff[];
 }
 
 /**
