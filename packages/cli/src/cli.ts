@@ -68,6 +68,7 @@ import {
   modelsResetCommand,
   modelsValidateCommand,
 } from './commands/models';
+import { mcpServeCommand } from './commands/mcp';
 import { closeDatabase, loadGlobalConfig } from '@archon/core';
 import {
   setLogLevel,
@@ -118,6 +119,7 @@ Commands:
   models set <kind> <name> <model>  Write a model assignment (kind: skill|agent|default|alias)
   models reset <kind> <name> Remove a project/global override
   models validate            Validate every models.yaml and check model routability
+  mcp serve                  Start the stdio MCP server (exposes skills/agents/models to Claude Code etc.)
   version                    Show version info
   help                       Show this help message
 
@@ -645,6 +647,17 @@ async function main(): Promise<number> {
             if (subcommand === undefined) console.error('Missing agents subcommand');
             else console.error(`Unknown agents subcommand: ${subcommand}`);
             console.error('Available: list, show');
+            return 1;
+        }
+
+      case 'mcp':
+        switch (subcommand) {
+          case 'serve':
+            return await mcpServeCommand({ cwd: effectiveCwd });
+          default:
+            if (subcommand === undefined) console.error('Missing mcp subcommand');
+            else console.error(`Unknown mcp subcommand: ${subcommand}`);
+            console.error('Available: serve');
             return 1;
         }
 

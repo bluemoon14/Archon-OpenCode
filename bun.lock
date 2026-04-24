@@ -35,8 +35,10 @@
         "@archon/providers": "workspace:*",
         "@archon/workflows": "workspace:*",
         "@clack/prompts": "^1.0.0",
+        "@modelcontextprotocol/sdk": "^1.0.0",
         "@sentry/node": "^8",
         "dotenv": "^17.2.3",
+        "zod": "^3.25.28",
       },
       "devDependencies": {
         "@types/node": "^22.0.0",
