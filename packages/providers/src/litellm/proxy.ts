@@ -48,10 +48,30 @@ export interface StartProxyOptions {
 let cachedHandle: ProxyHandle | undefined;
 let cachedSpec: { configPath: string; port: number } | undefined;
 let teardownRegistered = false;
+/**
+ * In-flight spawn promise. Serializes concurrent `getOrStartProxy` callers
+ * onto one `spawnProxy()` so two parallel `sendQuery()` calls don't both try
+ * to bind the same port. Cleared in `.finally()` regardless of outcome so a
+ * failed spawn doesn't wedge subsequent attempts.
+ */
+let pendingSpawn: Promise<ProxyHandle> | undefined;
+
+/**
+ * Spawner override — tests swap this in via `__setSpawnProxyForTesting` to
+ * exercise `getOrStartProxy` semantics (caching, concurrency, mismatch)
+ * without spawning a real `litellm` subprocess. Production uses the real
+ * `spawnProxy`.
+ */
+let spawnProxyImpl: (opts: StartProxyOptions) => Promise<ProxyHandle> = realSpawnProxy;
 
 /**
  * Return a cached running proxy when its config matches, otherwise spawn a new
  * one. When an external `baseUrl` is provided, skip spawning entirely.
+ *
+ * Concurrent callers with the same config share a single `spawnProxy()`
+ * invocation via `pendingSpawn`. Callers with different configs while a spawn
+ * is in-flight queue up and get their own spawn after the prior settles —
+ * rare in practice (Archon runs one workflow at a time per process).
  */
 export async function getOrStartProxy(
   opts: StartProxyOptions & { baseUrl?: string }
@@ -69,6 +89,21 @@ export async function getOrStartProxy(
     return cachedHandle;
   }
 
+  // Another caller is already spawning. Join that in-flight promise instead
+  // of starting a second spawn. If its config matches ours, we share the
+  // handle; if not, we wait for it to settle and start our own.
+  if (pendingSpawn !== undefined) {
+    const handle = await pendingSpawn;
+    if (
+      !handle.external &&
+      cachedSpec?.configPath === opts.configPath &&
+      cachedSpec.port === opts.port
+    ) {
+      return handle;
+    }
+    // Config mismatch — fall through to start our own spawn.
+  }
+
   // Config changed — tear down previous proxy if any, then spawn a fresh one.
   if (cachedHandle !== undefined && !cachedHandle.external) {
     cachedHandle.close();
@@ -76,14 +111,17 @@ export async function getOrStartProxy(
     cachedSpec = undefined;
   }
 
-  const handle = await spawnProxy(opts);
+  pendingSpawn = spawnProxyImpl(opts).finally(() => {
+    pendingSpawn = undefined;
+  });
+  const handle = await pendingSpawn;
   cachedHandle = handle;
   cachedSpec = { configPath: opts.configPath, port: opts.port };
   registerTeardownOnce();
   return handle;
 }
 
-async function spawnProxy(opts: StartProxyOptions): Promise<ProxyHandle> {
+async function realSpawnProxy(opts: StartProxyOptions): Promise<ProxyHandle> {
   const port = opts.port;
   const binary = opts.binaryPath ?? 'litellm';
   const args = ['--config', opts.configPath, '--port', String(port)];
@@ -207,4 +245,19 @@ export function resetProxySingleton(): void {
   if (cachedHandle !== undefined && !cachedHandle.external) cachedHandle.close();
   cachedHandle = undefined;
   cachedSpec = undefined;
+  pendingSpawn = undefined;
+}
+
+/** @internal Test hook — swap the spawner for a stub that doesn't touch child_process. */
+// eslint-disable-next-line @typescript-eslint/naming-convention
+export function __setSpawnProxyForTesting(
+  fn: (opts: StartProxyOptions) => Promise<ProxyHandle>
+): void {
+  spawnProxyImpl = fn;
+}
+
+/** @internal Test hook — restore the real spawner. */
+// eslint-disable-next-line @typescript-eslint/naming-convention
+export function __restoreSpawnProxy(): void {
+  spawnProxyImpl = realSpawnProxy;
 }
