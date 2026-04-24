@@ -56,6 +56,7 @@
         "zod": "^3",
       },
       "devDependencies": {
+        "@types/pg": "^8",
         "pino": "^9",
       },
       "peerDependencies": {
