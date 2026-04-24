@@ -1,8 +1,10 @@
 /**
- * Bundled default commands and workflows for binary distribution.
+ * Bundled default commands, workflows, skills, agents, and models.yaml for
+ * binary distribution.
  *
  * Content lives in `bundled-defaults.generated.ts`, which is regenerated from
- * `.archon/{commands,workflows}/defaults/` by `scripts/generate-bundled-defaults.ts`.
+ * `.archon/{commands,workflows,skills,agents}/defaults/` and
+ * `.archon/models.defaults.yaml` by `scripts/generate-bundled-defaults.ts`.
  * This file is the hand-written facade: it re-exports the records and defines
  * the binary-detection helper.
  *
@@ -22,7 +24,13 @@
 
 import { BUNDLED_IS_BINARY } from '@archon/paths';
 
-export { BUNDLED_COMMANDS, BUNDLED_WORKFLOWS } from './bundled-defaults.generated';
+export {
+  BUNDLED_COMMANDS,
+  BUNDLED_WORKFLOWS,
+  BUNDLED_SKILLS,
+  BUNDLED_AGENTS,
+  BUNDLED_MODELS_YAML,
+} from './bundled-defaults.generated';
 
 /**
  * Check if the current process is running as a compiled binary (not via Bun CLI).

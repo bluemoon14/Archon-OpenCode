@@ -1,0 +1,55 @@
+# Archon bundled model-assignment defaults.
+#
+# Ships with the binary as the lowest-priority (tier 4) entry in the
+# skill/agent model resolver. Users override via `~/.archon/models.yaml` or
+# `<repo>/.archon/models.yaml`, or by running `archon models set ...`.
+#
+# Model names use the LiteLLM canonical form (`provider/model-name`). Bare
+# shorthands like `sonnet`/`opus`/`haiku` route through Claude SDK when the
+# `claude` binary is detected, otherwise through LiteLLM.
+#
+# See docs/skills-and-agents.md + docs/litellm.md for the full precedence
+# chain and provider routing rules.
+
+version: 1
+
+defaults:
+  # Used when a workflow node has no `model:` field.
+  node: sonnet
+  # Used for any skill without a specific assignment below.
+  skill: anthropic/claude-haiku-4-5
+  # Used for any agent without a specific assignment below.
+  agent: anthropic/claude-sonnet-4-5
+
+skills:
+  # Cheap / routine — haiku is fine.
+  brainstorming: anthropic/claude-haiku-4-5
+  finishing-a-development-branch: anthropic/claude-haiku-4-5
+  using-git-worktrees: anthropic/claude-haiku-4-5
+  using-superpowers: anthropic/claude-haiku-4-5
+  verification-before-completion: anthropic/claude-haiku-4-5
+
+  # Requires careful reasoning — sonnet.
+  executing-plans: anthropic/claude-sonnet-4-5
+  receiving-code-review: anthropic/claude-sonnet-4-5
+  requesting-code-review: anthropic/claude-sonnet-4-5
+  test-driven-development: anthropic/claude-sonnet-4-5
+
+  # Deep planning / design / novel problem-solving — opus.
+  writing-plans: anthropic/claude-opus-4-5
+  writing-skills: anthropic/claude-opus-4-5
+  systematic-debugging: anthropic/claude-opus-4-5
+  subagent-driven-development: anthropic/claude-opus-4-5
+  dispatching-parallel-agents: anthropic/claude-opus-4-5
+
+agents:
+  # Code review is quality-critical — opus.
+  code-reviewer: anthropic/claude-opus-4-5
+
+# Human-friendly aliases that users can put in models.yaml overrides or in
+# `archon models set ...` commands. Resolver expands these after the winning
+# tier is chosen.
+aliases:
+  fast: anthropic/claude-haiku-4-5
+  balanced: anthropic/claude-sonnet-4-5
+  smart: anthropic/claude-opus-4-5

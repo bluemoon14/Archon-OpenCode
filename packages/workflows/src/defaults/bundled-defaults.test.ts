@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'bun:test';
-import { readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { isBinaryBuild, BUNDLED_COMMANDS, BUNDLED_WORKFLOWS } from './bundled-defaults';
+import {
+  isBinaryBuild,
+  BUNDLED_COMMANDS,
+  BUNDLED_WORKFLOWS,
+  BUNDLED_SKILLS,
+  BUNDLED_AGENTS,
+  BUNDLED_MODELS_YAML,
+} from './bundled-defaults';
 
 // Resolve the on-disk defaults directories relative to this test file so the
 // tests work regardless of cwd. From packages/workflows/src/defaults go up
@@ -9,6 +16,9 @@ import { isBinaryBuild, BUNDLED_COMMANDS, BUNDLED_WORKFLOWS } from './bundled-de
 const REPO_ROOT = join(import.meta.dir, '..', '..', '..', '..');
 const COMMANDS_DIR = join(REPO_ROOT, '.archon/commands/defaults');
 const WORKFLOWS_DIR = join(REPO_ROOT, '.archon/workflows/defaults');
+const SKILLS_DIR = join(REPO_ROOT, '.archon/skills/defaults');
+const AGENTS_DIR = join(REPO_ROOT, '.archon/agents/defaults');
+const MODELS_YAML_PATH = join(REPO_ROOT, '.archon/models.defaults.yaml');
 
 describe('bundled-defaults', () => {
   describe('isBinaryBuild', () => {
@@ -115,6 +125,73 @@ describe('bundled-defaults', () => {
         expect(content).toContain('name:');
         expect(content).toContain('description:');
         expect(content.includes('nodes:')).toBe(true);
+      }
+    });
+  });
+
+  describe('BUNDLED_SKILLS', () => {
+    it('contains every skill directory in .archon/skills/defaults/', () => {
+      const onDisk = readdirSync(SKILLS_DIR)
+        .filter(name => {
+          const p = join(SKILLS_DIR, name);
+          if (!statSync(p).isDirectory()) return false;
+          return existsSync(join(p, 'SKILL.md'));
+        })
+        .sort();
+      expect(Object.keys(BUNDLED_SKILLS).sort()).toEqual(onDisk);
+    });
+
+    it('every skill has YAML frontmatter + non-trivial body', () => {
+      for (const [name, content] of Object.entries(BUNDLED_SKILLS)) {
+        expect(content.startsWith('---')).toBe(true);
+        expect(content.length).toBeGreaterThan(100);
+        expect(content).toContain(`name: ${name}`);
+      }
+    });
+
+    it('includes the core superpowers skills', () => {
+      // Acts as a canary against silent content loss during a sync.
+      for (const required of [
+        'systematic-debugging',
+        'test-driven-development',
+        'writing-plans',
+        'brainstorming',
+      ]) {
+        expect(BUNDLED_SKILLS[required]).toBeDefined();
+      }
+    });
+  });
+
+  describe('BUNDLED_AGENTS', () => {
+    it('contains every .md file in .archon/agents/defaults/', () => {
+      const onDisk = readdirSync(AGENTS_DIR)
+        .filter(f => f.endsWith('.md'))
+        .map(f => f.slice(0, -'.md'.length))
+        .sort();
+      expect(Object.keys(BUNDLED_AGENTS).sort()).toEqual(onDisk);
+    });
+
+    it('every agent has YAML frontmatter', () => {
+      for (const [name, content] of Object.entries(BUNDLED_AGENTS)) {
+        expect(content.startsWith('---')).toBe(true);
+        expect(content).toContain(`name: ${name}`);
+      }
+    });
+  });
+
+  describe('BUNDLED_MODELS_YAML', () => {
+    it('matches .archon/models.defaults.yaml byte-for-byte (LF-normalized)', () => {
+      const disk = readFileSync(MODELS_YAML_PATH, 'utf-8').replace(/\r\n/g, '\n');
+      expect(BUNDLED_MODELS_YAML).toBe(disk);
+    });
+
+    it('declares version 1 and covers every vendored skill/agent', () => {
+      expect(BUNDLED_MODELS_YAML).toContain('version: 1');
+      for (const skillName of Object.keys(BUNDLED_SKILLS)) {
+        expect(BUNDLED_MODELS_YAML).toContain(`${skillName}:`);
+      }
+      for (const agentName of Object.keys(BUNDLED_AGENTS)) {
+        expect(BUNDLED_MODELS_YAML).toContain(`${agentName}:`);
       }
     });
   });
