@@ -1,18 +1,24 @@
 /**
- * `archon models list` — prints the full skill + agent assignment table with
- * the resolver's winning tier next to each entry. The single place to audit
- * "which model will this skill / agent actually use?" without reading YAML.
- *
- * Deferred (follow-up): `models set|reset|validate` subcommands. Today users
- * edit `.archon/models.yaml` directly — the resolver picks up changes on the
- * next run. A guided setter is pure convenience.
+ * `archon models list|set|reset|validate` — read + write surface over the
+ * models.yaml manifest. Read-only `list` audits the resolver's winning tier
+ * per entry. The write subcommands (`set`, `reset`) target project scope by
+ * default (`.archon/models.yaml`); pass `--global` to target `~/.archon/
+ * models.yaml`. `validate` parses all three tiers through the Zod schema
+ * and checks every model string is routable.
  */
-import { createSkillAgentRegistry } from '@archon/workflows/skill-agent-registry';
+import {
+  createSkillAgentRegistry,
+  modelsFilePath,
+  readModelsFileOrSkeleton,
+  writeModelsFile,
+} from '@archon/workflows/skill-agent-registry';
 import {
   resolveAgentModel,
   resolveNodeModel,
   resolveSkillModel,
 } from '@archon/workflows/model-resolution';
+import { modelsFileSchema, type ModelsFile } from '@archon/workflows/schemas/models';
+import { inferProviderFromModel, isModelCompatible } from '@archon/workflows/model-validation';
 
 export interface ModelsListOptions {
   cwd: string;
@@ -151,4 +157,267 @@ export async function modelsListCommand(opts: ModelsListOptions): Promise<number
     );
   }
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// set / reset / validate
+// ---------------------------------------------------------------------------
+
+export type ModelsKind = 'skill' | 'agent' | 'default' | 'alias';
+
+const VALID_DEFAULT_NAMES = new Set(['node', 'skill', 'agent']);
+
+function kindIsValid(kind: string): kind is ModelsKind {
+  return kind === 'skill' || kind === 'agent' || kind === 'default' || kind === 'alias';
+}
+
+export interface ModelsSetOptions {
+  cwd: string;
+  kind: string;
+  name: string;
+  model: string;
+  global?: boolean;
+}
+
+export async function modelsSetCommand(opts: ModelsSetOptions): Promise<number> {
+  if (!kindIsValid(opts.kind)) {
+    console.error(`Unknown kind '${opts.kind}'. Must be one of: skill, agent, default, alias.`);
+    return 1;
+  }
+  if (opts.kind === 'default' && !VALID_DEFAULT_NAMES.has(opts.name)) {
+    console.error(`Unknown default key '${opts.name}'. Must be one of: node, skill, agent.`);
+    return 1;
+  }
+  if (opts.name.length === 0 || opts.model.length === 0) {
+    console.error('Both <name> and <model> are required.');
+    return 1;
+  }
+
+  const scope: 'project' | 'global' = opts.global === true ? 'global' : 'project';
+  const path = modelsFilePath(scope, { repoRoot: opts.cwd });
+  const file = await readModelsFileOrSkeleton(path);
+  const updated = applyModelsSet(file, opts.kind, opts.name, opts.model);
+  await writeModelsFile(path, updated);
+
+  console.log(`✓ Wrote ${path}`);
+  console.log(`  ${renderKey(opts.kind, opts.name)}: ${opts.model}`);
+  return 0;
+}
+
+export interface ModelsResetOptions {
+  cwd: string;
+  kind: string;
+  name: string;
+  global?: boolean;
+}
+
+export async function modelsResetCommand(opts: ModelsResetOptions): Promise<number> {
+  if (!kindIsValid(opts.kind)) {
+    console.error(`Unknown kind '${opts.kind}'. Must be one of: skill, agent, default, alias.`);
+    return 1;
+  }
+
+  const scope: 'project' | 'global' = opts.global === true ? 'global' : 'project';
+  const path = modelsFilePath(scope, { repoRoot: opts.cwd });
+  const file = await readModelsFileOrSkeleton(path);
+  const { updated, removed } = applyModelsReset(file, opts.kind, opts.name);
+  if (!removed) {
+    console.log(`No ${renderKey(opts.kind, opts.name)} assignment in ${path} — nothing to reset.`);
+    return 0;
+  }
+  await writeModelsFile(path, updated);
+  console.log(`✓ Removed ${renderKey(opts.kind, opts.name)} from ${path}`);
+  return 0;
+}
+
+export interface ModelsValidateOptions {
+  cwd: string;
+  json?: boolean;
+}
+
+interface ValidationIssue {
+  scope: 'bundled' | 'global' | 'project';
+  key: string;
+  value: string;
+  message: string;
+}
+
+export async function modelsValidateCommand(opts: ModelsValidateOptions): Promise<number> {
+  const registry = createSkillAgentRegistry({ repoRoot: opts.cwd });
+  let files: ReturnType<typeof registry.modelsFiles>;
+  try {
+    files = registry.modelsFiles();
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 1;
+  }
+
+  const issues: ValidationIssue[] = [];
+  const report: {
+    scope: string;
+    status: 'ok' | 'missing' | 'invalid';
+    counts?: Record<string, number>;
+  }[] = [];
+
+  for (const scope of ['bundled', 'global', 'project'] as const) {
+    const file = files[scope];
+    if (!file) {
+      report.push({ scope, status: 'missing' });
+      continue;
+    }
+    const counts = {
+      skills: Object.keys(file.skills ?? {}).length,
+      agents: Object.keys(file.agents ?? {}).length,
+      aliases: Object.keys(file.aliases ?? {}).length,
+    };
+    const aliasKeys = new Set(Object.keys(file.aliases ?? {}));
+    // Collect every model string used in this file, plus the key path.
+    const refs: { key: string; value: string }[] = [];
+    for (const [key, val] of Object.entries(file.defaults ?? {})) {
+      if (typeof val === 'string') refs.push({ key: `defaults.${key}`, value: val });
+    }
+    for (const [name, val] of Object.entries(file.skills ?? {})) {
+      refs.push({ key: `skills.${name}`, value: val });
+    }
+    for (const [name, val] of Object.entries(file.agents ?? {})) {
+      refs.push({ key: `agents.${name}`, value: val });
+    }
+    // Aliases themselves point at concrete model names; check the target.
+    for (const [name, val] of Object.entries(file.aliases ?? {})) {
+      refs.push({ key: `aliases.${name}`, value: val });
+    }
+
+    for (const { key, value } of refs) {
+      // `inherit` + alias references + bare shorthand + canonical form all
+      // count as "routable". Report anything that fails every check.
+      if (value === 'inherit') continue;
+      if (aliasKeys.has(value)) continue;
+      const provider = inferProviderFromModel(value, 'claude');
+      if (
+        provider === 'claude' &&
+        !['sonnet', 'opus', 'haiku'].includes(value) &&
+        !value.startsWith('claude-')
+      ) {
+        // inferProviderFromModel falls back to claude for unknown — verify compatibility.
+        if (!isModelCompatible('claude', value)) {
+          issues.push({ scope, key, value, message: `no provider accepts model '${value}'` });
+          continue;
+        }
+      }
+      if (!isModelCompatible(provider, value)) {
+        issues.push({
+          scope,
+          key,
+          value,
+          message: `model '${value}' not compatible with inferred provider '${provider}'`,
+        });
+      }
+    }
+    report.push({
+      scope,
+      status: issues.some(i => i.scope === scope) ? 'invalid' : 'ok',
+      counts,
+    });
+  }
+
+  if (opts.json === true) {
+    console.log(JSON.stringify({ report, issues }, null, 2));
+    return issues.length > 0 ? 1 : 0;
+  }
+
+  for (const r of report) {
+    if (r.status === 'missing') {
+      console.log(`  ${r.scope.padEnd(7)} models.yaml not present — skipped`);
+    } else if (r.status === 'ok') {
+      const c = r.counts ?? { skills: 0, agents: 0, aliases: 0 };
+      console.log(
+        `✓ ${r.scope.padEnd(7)} schema OK (${String(c.skills)} skills, ${String(c.agents)} agents, ${String(c.aliases)} aliases)`
+      );
+    } else {
+      console.log(`✗ ${r.scope.padEnd(7)} has validation issues`);
+    }
+  }
+
+  if (issues.length > 0) {
+    console.log('');
+    console.log('Issues:');
+    for (const issue of issues) {
+      console.log(`  [${issue.scope}] ${issue.key} = ${issue.value} — ${issue.message}`);
+    }
+    return 1;
+  }
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
+function renderKey(kind: string, name: string): string {
+  if (kind === 'default') return `defaults.${name}`;
+  return `${kind}s.${name}`;
+}
+
+function omitStringKey(obj: Record<string, string>, key: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key));
+}
+
+function omitDefaultsKey(
+  obj: NonNullable<ModelsFile['defaults']>,
+  key: string
+): NonNullable<ModelsFile['defaults']> {
+  const out: NonNullable<ModelsFile['defaults']> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === key) continue;
+    if (k === 'node' || k === 'skill' || k === 'agent') {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+export function applyModelsSet(
+  file: ModelsFile,
+  kind: ModelsKind,
+  name: string,
+  value: string
+): ModelsFile {
+  const next: ModelsFile = { ...file, version: 1 };
+  if (kind === 'skill') {
+    next.skills = { ...(file.skills ?? {}), [name]: value };
+  } else if (kind === 'agent') {
+    next.agents = { ...(file.agents ?? {}), [name]: value };
+  } else if (kind === 'alias') {
+    next.aliases = { ...(file.aliases ?? {}), [name]: value };
+  } else {
+    next.defaults = { ...(file.defaults ?? {}), [name]: value };
+  }
+  // Round-trip through the schema to catch any shape drift.
+  return modelsFileSchema.parse(next);
+}
+
+export function applyModelsReset(
+  file: ModelsFile,
+  kind: ModelsKind,
+  name: string
+): { updated: ModelsFile; removed: boolean } {
+  const next: ModelsFile = { ...file, version: 1 };
+  let removed = false;
+  if (kind === 'skill' && file.skills?.[name] !== undefined) {
+    next.skills = omitStringKey(file.skills, name);
+    removed = true;
+  } else if (kind === 'agent' && file.agents?.[name] !== undefined) {
+    next.agents = omitStringKey(file.agents, name);
+    removed = true;
+  } else if (kind === 'alias' && file.aliases?.[name] !== undefined) {
+    next.aliases = omitStringKey(file.aliases, name);
+    removed = true;
+  } else if (
+    kind === 'default' &&
+    file.defaults?.[name as 'node' | 'skill' | 'agent'] !== undefined
+  ) {
+    next.defaults = omitDefaultsKey(file.defaults, name);
+    removed = true;
+  }
+  return { updated: modelsFileSchema.parse(next), removed };
 }

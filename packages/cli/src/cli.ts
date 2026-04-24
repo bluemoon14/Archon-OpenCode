@@ -62,7 +62,12 @@ import { setupCommand } from './commands/setup';
 import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
 import { skillsListCommand, skillsShowCommand } from './commands/skills';
 import { agentsListCommand, agentsShowCommand } from './commands/agents';
-import { modelsListCommand } from './commands/models';
+import {
+  modelsListCommand,
+  modelsSetCommand,
+  modelsResetCommand,
+  modelsValidateCommand,
+} from './commands/models';
 import { closeDatabase, loadGlobalConfig } from '@archon/core';
 import {
   setLogLevel,
@@ -110,6 +115,9 @@ Commands:
   agents list                List every agent (bundled + global + project)
   agents show <name>         Show an agent's body + resolved model
   models list                Show the full skill/agent model-assignment table
+  models set <kind> <name> <model>  Write a model assignment (kind: skill|agent|default|alias)
+  models reset <kind> <name> Remove a project/global override
+  models validate            Validate every models.yaml and check model routability
   version                    Show version info
   help                       Show this help message
 
@@ -644,10 +652,48 @@ async function main(): Promise<number> {
         switch (subcommand) {
           case 'list':
             return await modelsListCommand({ cwd: effectiveCwd, json: jsonFlag });
+          case 'set': {
+            const kind = positionals[2];
+            const name = positionals[3];
+            const model = positionals[4];
+            const globalFlag = args.includes('--global') || positionals.includes('--global');
+            if (kind === undefined || name === undefined || model === undefined) {
+              console.error(
+                'Usage: archon models set <skill|agent|default|alias> <name> <model> [--global]'
+              );
+              return 1;
+            }
+            return await modelsSetCommand({
+              cwd: effectiveCwd,
+              kind,
+              name,
+              model,
+              global: globalFlag,
+            });
+          }
+          case 'reset': {
+            const kind = positionals[2];
+            const name = positionals[3];
+            const globalFlag = args.includes('--global') || positionals.includes('--global');
+            if (kind === undefined || name === undefined) {
+              console.error(
+                'Usage: archon models reset <skill|agent|default|alias> <name> [--global]'
+              );
+              return 1;
+            }
+            return await modelsResetCommand({
+              cwd: effectiveCwd,
+              kind,
+              name,
+              global: globalFlag,
+            });
+          }
+          case 'validate':
+            return await modelsValidateCommand({ cwd: effectiveCwd, json: jsonFlag });
           default:
             if (subcommand === undefined) console.error('Missing models subcommand');
             else console.error(`Unknown models subcommand: ${subcommand}`);
-            console.error('Available: list');
+            console.error('Available: list, set, reset, validate');
             return 1;
         }
 

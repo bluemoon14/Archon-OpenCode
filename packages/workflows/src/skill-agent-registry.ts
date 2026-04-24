@@ -11,8 +11,8 @@
  * source of truth. Missing files at any tier fall through silently.
  */
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { BUNDLED_AGENTS, BUNDLED_MODELS_YAML, BUNDLED_SKILLS } from './defaults/bundled-defaults';
 import { modelsFileSchema, type ModelsFile } from './schemas/models';
@@ -116,6 +116,46 @@ export async function readModelsFiles(
   const global = await loadModelsFileAsync(join(userArchonDir, 'models.yaml'));
   const project = await loadModelsFileAsync(join(repoRoot, '.archon', 'models.yaml'));
   return { bundled, global, project };
+}
+
+/**
+ * Resolve the models.yaml path for a given scope.
+ * - `'project'` → `<repoRoot>/.archon/models.yaml`
+ * - `'global'`  → `~/.archon/models.yaml` (or `<userArchonDir>/models.yaml`)
+ */
+export function modelsFilePath(
+  scope: 'project' | 'global',
+  locations: RegistryLocations = {}
+): string {
+  const repoRoot = locations.repoRoot ?? process.cwd();
+  const userArchonDir = locations.userArchonDir ?? join(homedir(), '.archon');
+  return scope === 'project'
+    ? join(repoRoot, '.archon', 'models.yaml')
+    : join(userArchonDir, 'models.yaml');
+}
+
+/**
+ * Read a models.yaml file at `path`, or return a skeleton `{ version: 1 }`
+ * when the file doesn't exist. Validates through the Zod schema — throws
+ * on malformed content. Used by `archon models set` / `reset` as the
+ * read-before-merge step.
+ */
+export async function readModelsFileOrSkeleton(path: string): Promise<ModelsFile> {
+  const parsed = await loadModelsFileAsync(path);
+  return parsed ?? { version: 1 };
+}
+
+/**
+ * Atomic write of a models.yaml file. Validates through the schema before
+ * writing so we never leave bad YAML on disk. Creates parent dirs as needed.
+ */
+export async function writeModelsFile(path: string, file: ModelsFile): Promise<void> {
+  // Schema round-trip catches invariant violations (empty strings, etc.)
+  // before they hit disk.
+  const checked = modelsFileSchema.parse(file);
+  const yaml = Bun.YAML.stringify(checked);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, yaml, 'utf-8');
 }
 
 // ---------------------------------------------------------------------------
