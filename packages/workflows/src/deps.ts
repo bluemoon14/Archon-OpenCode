@@ -79,11 +79,22 @@ export interface WorkflowConfig {
     loadDefaultWorkflows?: boolean;
     loadDefaultCommands?: boolean;
   };
-  // Intersection: generic map for future providers + typed claude entry.
+  // Intersection: generic map for third-party providers + typed built-in entries.
   assistants: ProviderDefaultsMap & {
     claude: {
       model?: string;
       settingSources?: ('project' | 'user')[];
+    };
+    opencode: {
+      model?: string;
+      opencodeBinaryPath?: string;
+      baseUrl?: string;
+      providers?: Record<string, { authTokenEnv?: string }>;
+    };
+    pydantic: {
+      uvBinaryPath?: string;
+      agentsDir?: string;
+      agents?: Record<string, { entry: string; deps?: string[] }>;
     };
   };
 }

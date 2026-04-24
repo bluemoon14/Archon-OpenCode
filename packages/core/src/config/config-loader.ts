@@ -143,13 +143,18 @@ const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
 # Bot display name (shown in messages)
 # botName: Archon
 
-# Default AI assistant (currently only 'claude' is supported)
+# Default AI assistant ('claude' | 'opencode' | 'pydantic')
 # defaultAssistant: claude
 
 # Assistant defaults
 # assistants:
 #   claude:
 #     model: sonnet
+#   opencode:
+#     model: opencode/gpt-4o-mini
+#   pydantic:
+#     agents:
+#       smoke: { entry: .archon/agents/smoke.py }
 
 # Concurrency settings
 # concurrency:
@@ -245,13 +250,13 @@ export async function loadRepoConfig(repoPath: string): Promise<RepoConfig> {
  */
 function getDefaults(): MergedConfig {
   // Seed one empty entry per registered provider. No per-provider listing here:
-  // adding a new provider must not require editing this function.
+  // adding a new provider must not require editing this function. Cast is safe
+  // because `registerBuiltinProviders()` runs before `loadConfig()` at every
+  // entrypoint, so the loop below populates every built-in slot.
   const providers = getRegisteredProviders();
-  const registeredAssistants: AssistantDefaults = { claude: {} };
+  const registeredAssistants = {} as AssistantDefaults;
   for (const provider of providers) {
-    if (!(provider.id in registeredAssistants)) {
-      registeredAssistants[provider.id] = {};
-    }
+    registeredAssistants[provider.id] = {};
   }
 
   return {

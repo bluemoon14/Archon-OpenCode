@@ -1,12 +1,12 @@
 /**
  * Provider Registry
  *
- * Currently supports Claude only. The registry pattern is retained as a thin
- * abstraction so the system stays open to future providers without rewiring
- * the orchestrator and workflow executor.
+ * Built-ins: Claude (Anthropic), OpenCode (spawned `opencode serve`), and
+ * Pydantic AI (BYO Python agent over a JSONL stdio bridge). Third-party
+ * providers register via `registerProvider()` before any lookups.
  *
- * Bootstrap: callers must call registerBuiltinProviders() at process entrypoints
- * (server startup, CLI init) before any provider lookups.
+ * Bootstrap: callers must call registerBuiltinProviders() at process
+ * entrypoints (CLI init) before any provider lookups.
  */
 import type {
   IAgentProvider,

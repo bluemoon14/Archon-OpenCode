@@ -13,17 +13,28 @@
 
 // Provider config defaults — canonical definitions live in @archon/providers/types.
 // Imported and re-exported here so existing consumers don't break.
-import type { ClaudeProviderDefaults, ProviderDefaultsMap } from '@archon/providers/types';
+import type {
+  ClaudeProviderDefaults,
+  OpenCodeProviderDefaults,
+  PydanticProviderDefaults,
+  ProviderDefaultsMap,
+} from '@archon/providers/types';
 
-export type { ClaudeProviderDefaults, ProviderDefaultsMap };
+export type {
+  ClaudeProviderDefaults,
+  OpenCodeProviderDefaults,
+  PydanticProviderDefaults,
+  ProviderDefaultsMap,
+};
 
 /**
  * Intersection type: generic `ProviderDefaultsMap` (any string key) with
- * typed built-in entries. Currently only Claude is built in; future
- * providers (OpenCode, Pydantic AI, etc.) will be added here.
+ * typed built-in entries. Built-ins: claude, opencode, pydantic.
  */
 export type AssistantDefaultsConfig = ProviderDefaultsMap & {
   claude?: ClaudeProviderDefaults;
+  opencode?: OpenCodeProviderDefaults;
+  pydantic?: PydanticProviderDefaults;
 };
 
 /**
@@ -31,10 +42,12 @@ export type AssistantDefaultsConfig = ProviderDefaultsMap & {
  *
  * `getDefaults()` seeds every registered provider with `{}`.
  * `registerBuiltinProviders()` is called before `loadConfig()` at every
- * process entrypoint, so claude is guaranteed present.
+ * process entrypoint, so all built-ins are guaranteed present.
  */
 export type AssistantDefaults = ProviderDefaultsMap & {
   claude: ClaudeProviderDefaults;
+  opencode: OpenCodeProviderDefaults;
+  pydantic: PydanticProviderDefaults;
 };
 
 export interface GlobalConfig {

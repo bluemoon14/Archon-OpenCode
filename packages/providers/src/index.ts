@@ -34,6 +34,7 @@ export { ClaudeProvider } from './claude/provider';
 
 // Config parsers
 export { parseClaudeConfig, type ClaudeProviderDefaults } from './claude/config';
+export type { OpenCodeProviderDefaults, PydanticProviderDefaults } from './types';
 
 // Utilities (needed by consumers)
 export { resolveClaudeBinaryPath, fileExists as claudeFileExists } from './claude/binary-resolver';

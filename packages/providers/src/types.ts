@@ -19,6 +19,37 @@ export interface ClaudeProviderDefaults {
   claudeBinaryPath?: string;
 }
 
+export interface OpenCodeProviderDefaults {
+  [key: string]: unknown;
+  model?: string;
+  /** Absolute path to the `opencode` binary. Required in compiled Archon
+   *  builds when `OPENCODE_BIN_PATH` is not set; optional in dev mode where
+   *  autodetection covers the common install locations. */
+  opencodeBinaryPath?: string;
+  /** Escape hatch: point at an externally-managed `opencode serve` instance.
+   *  When set, Archon does NOT spawn a child process and treats the URL as
+   *  the SDK base URL. */
+  baseUrl?: string;
+  /** Per-upstream-provider credentials passed through to `opencode serve` at
+   *  spawn time. Values are env-var NAMES (e.g. `OPENAI_API_KEY`), not the
+   *  secrets themselves — no secrets in YAML. */
+  providers?: Record<string, { authTokenEnv?: string }>;
+}
+
+export interface PydanticProviderDefaults {
+  [key: string]: unknown;
+  /** Absolute path to the `uv` binary (https://docs.astral.sh/uv). Required
+   *  in compiled builds when `UV_BIN_PATH` is not set; optional in dev mode. */
+  uvBinaryPath?: string;
+  /** Directory (relative to repo root) scanned for agent entry files.
+   *  @default '.archon/agents' */
+  agentsDir?: string;
+  /** Named Pydantic AI agents, each pointing at a user-authored Python file
+   *  that exports an `agent: pydantic_ai.Agent`. Selected per-node via the
+   *  `agent:` field on workflow YAML. */
+  agents?: Record<string, { entry: string; deps?: string[] }>;
+}
+
 /** Generic per-provider defaults bag used by config surfaces and UI. */
 export type ProviderDefaults = Record<string, unknown>;
 
@@ -146,6 +177,10 @@ export interface NodeConfig {
   systemPrompt?: string;
   fallbackModel?: string;
   idle_timeout?: number;
+  /** Named provider-scoped selector. Today only Pydantic AI uses it: the
+   *  value names a pre-configured agent under `assistants.pydantic.agents`.
+   *  Schema-level validator requires `provider: pydantic` when present. */
+  agent?: string;
   [key: string]: unknown;
 }
 
@@ -223,8 +258,7 @@ export interface ProviderInfo {
 }
 
 /**
- * Generic agent provider interface.
- * Currently only Claude is supported.
+ * Generic agent provider interface. Built-ins: Claude, OpenCode, Pydantic AI.
  */
 export interface IAgentProvider {
   sendQuery(
