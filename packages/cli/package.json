@@ -8,7 +8,7 @@
   },
   "scripts": {
     "cli": "bun src/cli.ts",
-    "test": "bun test src/commands/version.test.ts src/commands/setup.test.ts && bun test src/commands/workflow.test.ts && bun test src/commands/isolation.test.ts && bun test src/commands/chat.test.ts",
+    "test": "bun test src/commands/version.test.ts src/commands/setup.test.ts && bun test src/commands/workflow.test.ts && bun test src/commands/isolation.test.ts && bun test src/commands/chat.test.ts && bun test src/sentry/init.test.ts",
     "type-check": "bun x tsc --noEmit"
   },
   "dependencies": {
@@ -19,6 +19,7 @@
     "@archon/providers": "workspace:*",
     "@archon/workflows": "workspace:*",
     "@clack/prompts": "^1.0.0",
+    "@sentry/node": "^8",
     "dotenv": "^17.2.3"
   },
   "devDependencies": {

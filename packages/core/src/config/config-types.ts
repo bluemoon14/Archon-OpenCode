@@ -82,6 +82,29 @@ export interface GlobalConfig {
      */
     maxConversations?: number;
   };
+
+  /**
+   * Sentry error-reporting settings. Off by default. Enables stack-trace
+   * reporting for uncaught exceptions, unhandled rejections, and
+   * logger.fatal(...) events. Not a log stream — ordinary logger.error(...)
+   * is not forwarded.
+   *
+   * DSN resolution order (first match wins):
+   *   1. ARCHON_DISABLE_SENTRY=1 forces off.
+   *   2. ARCHON_SENTRY_DSN / SENTRY_DSN env var.
+   *   3. this `dsn` field.
+   */
+  sentry?: {
+    /**
+     * Sentry project DSN. Leave unset to keep Sentry disabled.
+     */
+    dsn?: string;
+    /**
+     * Environment tag attached to events (e.g. 'production', 'staging').
+     * @default 'production'
+     */
+    environment?: string;
+  };
 }
 
 /**

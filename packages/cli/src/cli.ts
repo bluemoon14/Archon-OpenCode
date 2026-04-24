@@ -60,15 +60,17 @@ import { continueCommand } from './commands/continue';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
 import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
-import { closeDatabase } from '@archon/core';
+import { closeDatabase, loadGlobalConfig } from '@archon/core';
 import {
   setLogLevel,
+  setErrorReporter,
   createLogger,
   checkForUpdate,
   BUNDLED_IS_BINARY,
   BUNDLED_VERSION,
 } from '@archon/paths';
 import * as git from '@archon/git';
+import { initSentry, captureException, flushSentry } from './sentry/init';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -140,6 +142,56 @@ async function closeDb(): Promise<void> {
   }
 }
 
+/**
+ * Initialize Sentry (if configured) and wire:
+ *   1. process-level uncaughtException / unhandledRejection handlers,
+ *   2. the logger.fatal hook in @archon/paths.
+ *
+ * Called once before the main command dispatch. All steps are safe to skip
+ * when Sentry is disabled.
+ */
+let sentryHandlersInstalled = false;
+async function setupSentry(): Promise<void> {
+  if (sentryHandlersInstalled) return;
+  sentryHandlersInstalled = true;
+
+  const globalConfig = await loadGlobalConfig().catch(() => ({}));
+  const sentryConfig = (globalConfig as { sentry?: { dsn?: string; environment?: string } }).sentry;
+  const enabled = await initSentry({
+    dsn: sentryConfig?.dsn,
+    environment: sentryConfig?.environment,
+  });
+  if (!enabled) return;
+
+  setErrorReporter((err, ctx) => {
+    captureException(err, ctx);
+  });
+
+  let terminating = false;
+  const terminalCapture = (
+    err: unknown,
+    kind: 'uncaughtException' | 'unhandledRejection'
+  ): void => {
+    if (terminating) return;
+    terminating = true;
+    captureException(err, { kind });
+    // Make the error visible on stderr even when the handler is called — the
+    // default Node behavior is to print + exit, but registering this listener
+    // suppresses both. Surface it ourselves before flushing.
+    const e = err as Error;
+    console.error(`Fatal (${kind}):`, e?.stack ?? e?.message ?? err);
+    void flushSentry().finally(() => {
+      process.exit(1);
+    });
+  };
+  process.on('uncaughtException', (err: Error) => {
+    terminalCapture(err, 'uncaughtException');
+  });
+  process.on('unhandledRejection', (reason: unknown) => {
+    terminalCapture(reason, 'unhandledRejection');
+  });
+}
+
 async function printUpdateNotice(quiet: boolean | undefined): Promise<void> {
   if (quiet || !BUNDLED_IS_BINARY) return;
   try {
@@ -159,6 +211,11 @@ async function printUpdateNotice(quiet: boolean | undefined): Promise<void> {
  * Returns exit code (0 = success, non-zero = failure)
  */
 async function main(): Promise<number> {
+  // Wire Sentry (and process-level error handlers) before argument parsing
+  // so crashes in parseArgs / option handling are still reported. Safe no-op
+  // when no DSN is configured.
+  await setupSentry();
+
   const args = process.argv.slice(2);
 
   // Handle no arguments - show help and exit successfully
@@ -574,6 +631,9 @@ async function main(): Promise<number> {
   } finally {
     // Always close database connection
     await closeDb();
+    // Flush any queued Sentry events before the process exits. No-op when
+    // Sentry is disabled; bounded by the flush timeout so it never hangs.
+    await flushSentry();
   }
 }
 
@@ -584,6 +644,9 @@ main()
   })
   .catch((error: unknown) => {
     const err = error as Error;
+    captureException(err, { kind: 'mainCatch' });
     console.error('Fatal error:', err.message);
-    process.exit(1);
+    void flushSentry().finally(() => {
+      process.exit(1);
+    });
   });

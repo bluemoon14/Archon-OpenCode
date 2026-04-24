@@ -38,6 +38,7 @@ import * as workflowEventsDb from '@archon/core/db/workflow-events';
 import type { WorkflowEventRow } from '@archon/core/db/workflow-events';
 import * as git from '@archon/git';
 import { CLIAdapter } from '../adapters/cli-adapter';
+import { flushSentry } from '../sentry/init';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -649,7 +650,9 @@ export async function workflowRunCommand(
         );
       })
       .finally(() => {
-        process.exit(1);
+        void flushSentry().finally(() => {
+          process.exit(1);
+        });
       });
   };
   process.once('SIGTERM', () => {

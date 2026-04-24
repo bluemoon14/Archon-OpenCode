@@ -191,6 +191,18 @@ assistants:
 
 **Priority**: workflow YAML options > `.archon/config.yaml` > SDK defaults. Model validation at load time enforces provider/model compatibility.
 
+### Sentry (error reporting)
+
+Off by default. Enables stack-trace capture for uncaught exceptions, unhandled rejections, and `logger.fatal(...)` only — ordinary `logger.error(...)` is **not** forwarded. To turn it on, set a DSN in `~/.archon/config.yaml` or via env var:
+
+```yaml
+sentry:
+  dsn: https://<key>@<org>.ingest.sentry.io/<project>
+  environment: production   # optional, defaults to 'production'
+```
+
+Env-var precedence (highest first): `ARCHON_DISABLE_SENTRY=1` kill-switch > `ARCHON_SENTRY_DSN` > `SENTRY_DSN` > `sentry.dsn` in YAML. No DSN → Sentry is silently disabled and `@sentry/node` is never loaded.
+
 ## Archon Directories
 
 ```

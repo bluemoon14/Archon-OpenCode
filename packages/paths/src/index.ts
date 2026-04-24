@@ -35,8 +35,8 @@ export {
 } from './archon-paths';
 
 // Logger
-export { createLogger, setLogLevel, getLogLevel, rootLogger } from './logger';
-export type { Logger } from './logger';
+export { createLogger, setLogLevel, getLogLevel, rootLogger, setErrorReporter } from './logger';
+export type { Logger, FatalReporter } from './logger';
 
 // Build-time constants (rewritten by scripts/build-binaries.sh)
 export { BUNDLED_IS_BINARY, BUNDLED_VERSION, BUNDLED_GIT_COMMIT } from './bundled-build';
