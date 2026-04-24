@@ -27,7 +27,7 @@ export {
 } from './registry';
 
 // Error
-export { UnknownProviderError } from './errors';
+export { UnknownProviderError, ProviderError, type ProviderErrorCode } from './errors';
 
 // Provider classes
 export { ClaudeProvider } from './claude/provider';

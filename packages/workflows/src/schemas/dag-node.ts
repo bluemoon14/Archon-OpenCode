@@ -137,6 +137,9 @@ export const dagNodeBaseSchema = z.object({
   trigger_rule: triggerRuleSchema.optional(),
   model: z.string().optional(),
   provider: z.string().trim().min(1).optional(),
+  /** Named provider-scoped selector. Today only Pydantic AI uses it: the
+   *  value names a pre-configured agent under `assistants.pydantic.agents`. */
+  agent: z.string().trim().min(1).optional(),
   context: z.enum(['fresh', 'shared']).optional(),
   output_format: z.record(z.unknown()).optional(),
   allowed_tools: z.array(z.string()).optional(),
@@ -325,6 +328,7 @@ export type DagNode =
 export const BASH_NODE_AI_FIELDS: readonly string[] = [
   'provider',
   'model',
+  'agent',
   'context',
   'output_format',
   'allowed_tools',
@@ -523,6 +527,16 @@ export const dagNodeSchema = dagNodeBaseSchema
       });
     }
 
+    // Pydantic agent selection: `agent:` is only meaningful when provider is pydantic.
+    if (data.agent !== undefined && data.provider !== 'pydantic') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "'agent' is only valid when provider is 'pydantic' (names a configured Pydantic AI agent)",
+        path: ['agent'],
+      });
+    }
+
     // Provider/model compatibility (AI nodes only)
     if (!hasBash && !hasLoop && !hasScript && data.provider && data.model) {
       try {
@@ -564,6 +578,7 @@ export const dagNodeSchema = dagNodeBaseSchema
     const aiOnly = {
       ...(data.model !== undefined ? { model: data.model } : {}),
       ...(data.provider !== undefined ? { provider: data.provider } : {}),
+      ...(data.agent !== undefined ? { agent: data.agent } : {}),
       ...(data.context !== undefined ? { context: data.context } : {}),
       ...(data.output_format !== undefined ? { output_format: data.output_format } : {}),
       ...(data.allowed_tools !== undefined ? { allowed_tools: data.allowed_tools } : {}),
