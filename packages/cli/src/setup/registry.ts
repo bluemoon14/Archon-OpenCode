@@ -6,7 +6,8 @@
 import type { SetupPlugin } from './plugins';
 import { opencodeSetupPlugin } from './plugins/opencode';
 import { pydanticSetupPlugin } from './plugins/pydantic';
+import { litellmSetupPlugin } from './plugins/litellm';
 
 export function getSetupPlugins(): SetupPlugin[] {
-  return [opencodeSetupPlugin, pydanticSetupPlugin];
+  return [opencodeSetupPlugin, pydanticSetupPlugin, litellmSetupPlugin];
 }

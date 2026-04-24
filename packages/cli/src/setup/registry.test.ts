@@ -2,12 +2,13 @@ import { describe, it, expect } from 'bun:test';
 import { getSetupPlugins } from './registry';
 
 describe('getSetupPlugins', () => {
-  it('returns opencode and pydantic plugins', () => {
+  it('returns opencode, pydantic, and litellm plugins', () => {
     const plugins = getSetupPlugins();
     const ids = plugins.map(p => p.id);
     expect(ids).toContain('opencode');
     expect(ids).toContain('pydantic');
-    expect(plugins).toHaveLength(2);
+    expect(ids).toContain('litellm');
+    expect(plugins).toHaveLength(3);
   });
 
   it('each plugin exposes detect() and collect()', () => {
