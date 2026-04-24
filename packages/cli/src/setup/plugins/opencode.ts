@@ -91,51 +91,76 @@ async function collect(detection: SetupDetection): Promise<SetupPluginResult | n
     binaryPath = await promptForBinaryPath();
   }
 
-  // Per-upstream auth — map the provider IDs OpenCode supports to env-var names.
-  const chosen = await multiselect({
+  // Offer the LiteLLM fast-path first — one shared proxy + one master key
+  // covers every upstream (Anthropic, OpenAI, Azure, Novita, ...) without
+  // needing per-provider env vars on OpenCode's side.
+  const useLiteLLM = await confirm({
     message:
-      'Which upstream providers will OpenCode use? (env-var NAMES only — no secrets written)',
-    options: UPSTREAM_CHOICES.map(c => ({
-      value: c.value,
-      label: `${c.label}  (${c.envVar})`,
-    })),
-    required: false,
+      "Route OpenCode through your LiteLLM proxy? Uses one upstream surface for every provider — recommended if you've already run the LiteLLM setup.",
+    initialValue: true,
   });
-  if (isCancel(chosen)) {
+  if (isCancel(useLiteLLM)) {
     cancel('Setup cancelled.');
     process.exit(0);
   }
 
-  const providerMappings: Record<string, { authTokenEnv: string }> = {};
-  for (const id of chosen) {
-    const defaults = UPSTREAM_CHOICES.find(c => c.value === id);
-    if (!defaults) continue;
-    const custom = await text({
-      message: `Env-var NAME for ${defaults.label} (press enter for ${defaults.envVar}):`,
-      placeholder: defaults.envVar,
-      defaultValue: defaults.envVar,
+  const envLines: string[] = [];
+  if (binaryPath !== undefined) envLines.push(`OPENCODE_BIN_PATH=${binaryPath}`);
+
+  let configSnippet: string | undefined;
+  let postBody: string;
+
+  if (useLiteLLM) {
+    configSnippet = buildLiteLLMConfigSnippet(binaryPath);
+    postBody =
+      (binaryPath !== undefined
+        ? 'OPENCODE_BIN_PATH will be written to your Archon env file.\n'
+        : 'Relying on PATH to locate `opencode`.\n') +
+      'OpenCode is wired to use your LiteLLM proxy at http://localhost:4000. ' +
+      'Ensure LITELLM_MASTER_KEY is set in your env; the proxy handles every upstream.';
+  } else {
+    // Per-upstream auth — map the provider IDs OpenCode supports to env-var names.
+    const chosen = await multiselect({
+      message:
+        'Which upstream providers will OpenCode use? (env-var NAMES only — no secrets written)',
+      options: UPSTREAM_CHOICES.map(c => ({
+        value: c.value,
+        label: `${c.label}  (${c.envVar})`,
+      })),
+      required: false,
     });
-    if (isCancel(custom)) {
+    if (isCancel(chosen)) {
       cancel('Setup cancelled.');
       process.exit(0);
     }
-    providerMappings[id] = { authTokenEnv: custom?.trim() || defaults.envVar };
-  }
 
-  const envLines: string[] = [];
-  if (binaryPath) envLines.push(`OPENCODE_BIN_PATH=${binaryPath}`);
+    const providerMappings: Record<string, { authTokenEnv: string }> = {};
+    for (const id of chosen) {
+      const defaults = UPSTREAM_CHOICES.find(c => c.value === id);
+      if (!defaults) continue;
+      const custom = await text({
+        message: `Env-var NAME for ${defaults.label} (press enter for ${defaults.envVar}):`,
+        placeholder: defaults.envVar,
+        defaultValue: defaults.envVar,
+      });
+      if (isCancel(custom)) {
+        cancel('Setup cancelled.');
+        process.exit(0);
+      }
+      providerMappings[id] = { authTokenEnv: custom?.trim() || defaults.envVar };
+    }
 
-  const configSnippet = buildConfigSnippet(binaryPath, providerMappings);
-  const postNote = {
-    title: 'OpenCode configured',
-    body:
-      (binaryPath
+    configSnippet = buildConfigSnippet(binaryPath, providerMappings);
+    postBody =
+      (binaryPath !== undefined
         ? 'OPENCODE_BIN_PATH will be written to your Archon env file.\n'
         : 'Relying on PATH to locate `opencode`.\n') +
       (Object.keys(providerMappings).length > 0
         ? 'Append the config snippet below to .archon/config.yaml — Archon will read the upstream API keys from the env-var names you configured.'
-        : 'No upstream providers selected. OpenCode will use whatever auth its own config supplies.'),
-  };
+        : 'No upstream providers selected. OpenCode will use whatever auth its own config supplies.');
+  }
+
+  const postNote = { title: 'OpenCode configured', body: postBody };
 
   return { envLines, configSnippet, postNote };
 }
@@ -167,6 +192,24 @@ function buildConfigSnippet(
       lines.push(`        authTokenEnv: ${entry.authTokenEnv}`);
     }
   }
+  return lines.join('\n') + '\n';
+}
+
+/** LiteLLM fast-path: configure OpenCode to use the local LiteLLM proxy as
+ *  an openai-compatible upstream. Users don't need per-provider env vars;
+ *  LITELLM_MASTER_KEY + whatever the LiteLLM config exposes is enough. */
+function buildLiteLLMConfigSnippet(binaryPath: string | undefined): string {
+  const lines: string[] = ['assistants:', '  opencode:'];
+  if (binaryPath !== undefined) lines.push(`    opencodeBinaryPath: ${binaryPath}`);
+  lines.push('    # Route every OpenCode model through the LiteLLM proxy (openai-compatible).');
+  lines.push('    # Change baseUrl to match your LiteLLM setup if you moved it off :4000.');
+  lines.push('    baseUrl: http://localhost:4000');
+  lines.push('    providers:');
+  lines.push('      # OpenCode references this as its openai-compatible upstream.');
+  lines.push('      # The `authTokenEnv` points at LITELLM_MASTER_KEY — the proxy fans out to');
+  lines.push('      # Anthropic/Azure/Novita/etc via its own model_list.');
+  lines.push('      litellm:');
+  lines.push('        authTokenEnv: LITELLM_MASTER_KEY');
   return lines.join('\n') + '\n';
 }
 

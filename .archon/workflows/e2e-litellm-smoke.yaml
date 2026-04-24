@@ -1,0 +1,33 @@
+# E2E smoke test — LiteLLM provider
+# Verifies: LiteLLM proxy spawn + OpenAI SDK round-trip + stream translator.
+# Requires:
+#   - `litellm` on PATH (install via `uv tool install 'litellm[proxy]==<ver>'`)
+#   - `~/.archon/litellm_config.yaml` with a `model_list` that exposes
+#     `gpt-4o-mini` (or override the model string below to whatever your
+#     model_list exposes).
+#   - LITELLM_MASTER_KEY in env (set to match the proxy's general_settings.master_key).
+#   - OPENAI_API_KEY in env (or whichever upstream the chosen model points at).
+#
+# Opt-out: CI can skip via a `LITELLM_SMOKE=0` env gate the runner checks.
+name: e2e-litellm-smoke
+description: 'Smoke test for LiteLLM provider. Verifies proxy spawn + model routing + stream.'
+provider: litellm
+model: openai/gpt-4o-mini
+
+nodes:
+  # 1. Plain text query — spawns the proxy (first sendQuery in the process),
+  #    fires chat.completions, drains the stream into MessageChunks.
+  - id: simple
+    prompt: "What is 2+2? Answer with just the number, nothing else."
+    idle_timeout: 60000
+
+  # 2. Assert non-empty output — fails CI if LiteLLM returned nothing.
+  - id: assert
+    bash: |
+      output="$simple.output"
+      if [ -z "$output" ]; then
+        echo "FAIL: simple node returned empty output"
+        exit 1
+      fi
+      echo "PASS: simple=$output"
+    depends_on: [simple]

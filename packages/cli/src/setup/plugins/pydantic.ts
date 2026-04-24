@@ -163,6 +163,11 @@ function buildPostNote(binaryPath: string | undefined, agentFiles: string[]): st
       'No agent files found under .archon/agents/. Create one that exports `agent: pydantic_ai.Agent`, then rerun setup or register it manually.'
     );
   }
+  parts.push(
+    'Tip: to route your Pydantic agent through the LiteLLM proxy, construct the ' +
+      'model with its base_url: `OpenAIModel("gpt-4o", base_url=os.environ["LITELLM_BASE_URL"], ' +
+      'api_key=os.environ["LITELLM_MASTER_KEY"])`. Set LITELLM_BASE_URL=http://localhost:4000.'
+  );
   return parts.join('\n');
 }
 
