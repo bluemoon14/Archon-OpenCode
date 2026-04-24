@@ -21,7 +21,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { createLogger } from '@archon/paths';
 import {
   gatherAgentDetail,
   gatherAgentsList,
@@ -32,11 +31,9 @@ import {
 import { resumeWorkflow, runWorkflow, statusWorkflow } from './tools/workflow';
 import { invokeAgent, invokeSkill } from './tools/invoke';
 
-let cachedLog: ReturnType<typeof createLogger> | undefined;
-function getLog(): ReturnType<typeof createLogger> {
-  if (!cachedLog) cachedLog = createLogger('cli.mcp');
-  return cachedLog;
-}
+// NOTE: no `@archon/paths.createLogger` here — the Pino logger writes to
+// stdout by default, which MCP reserves for JSON-RPC framing. Diagnostics
+// from this module go to stderr via `process.stderr.write` instead.
 
 export interface ArchonMcpServerOptions {
   /** Repo root passed to every registry read. Defaults to `process.cwd()`. */
@@ -310,14 +307,39 @@ export function createArchonMcpServer(opts: ArchonMcpServerOptions = {}): McpSer
 }
 
 /**
- * Start the MCP server over stdio. Blocks until the transport closes — MCP
- * clients keep the process alive, so this function only returns on a clean
- * shutdown (stdin close, SIGINT, SIGTERM).
+ * Start the MCP server over stdio and block until the transport closes.
+ * Returns only on clean shutdown (stdin EOF, SIGINT, SIGTERM) so cli.ts's
+ * final `process.exit(code)` doesn't kill the server's stdin listener
+ * mid-session.
+ *
+ * IMPORTANT: MCP stdio protocol reserves process.stdout for JSON-RPC framing.
+ * Any other writer to stdout corrupts the stream and crashes the client.
+ * Archon's structured logger (Pino) defaults to stdout, so we write
+ * diagnostics directly to stderr here. Do not call `getLog()` or any other
+ * stdout-bound writer from the MCP runtime path — anything emitted after
+ * `server.connect(transport)` must go through the server's sendLoggingMessage
+ * protocol or directly to stderr.
  */
 export async function runArchonMcpServer(opts: ArchonMcpServerOptions = {}): Promise<void> {
   const server = createArchonMcpServer(opts);
   const transport = new StdioServerTransport();
-  getLog().info({ cwd: opts.cwd ?? process.cwd() }, 'mcp.server_starting');
+  const cwd = opts.cwd ?? process.cwd();
+  process.stderr.write(`[mcp] starting server (cwd=${cwd})\n`);
   await server.connect(transport);
-  getLog().info({}, 'mcp.server_ready');
+  process.stderr.write('[mcp] server ready — listening for JSON-RPC on stdio\n');
+
+  // Block until the client closes stdin or a term signal arrives. Without
+  // this, cli.ts calls process.exit(0) as soon as this function resolves,
+  // which kills the server's stdin listener before any request lands.
+  await new Promise<void>(resolve => {
+    const done = (): void => {
+      resolve();
+    };
+    transport.onclose = done;
+    process.once('SIGINT', done);
+    process.once('SIGTERM', done);
+    process.stdin.once('end', done);
+    process.stdin.once('close', done);
+  });
+  process.stderr.write('[mcp] transport closed — shutting down\n');
 }
