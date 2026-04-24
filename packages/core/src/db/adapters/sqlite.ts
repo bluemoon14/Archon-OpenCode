@@ -198,6 +198,13 @@ export class SqliteAdapter implements IDatabase {
       if (!wfColNames.has('working_path')) {
         this.db.run('ALTER TABLE remote_agent_workflow_runs ADD COLUMN working_path TEXT');
       }
+
+      if (!wfColNames.has('total_cost_usd')) {
+        // REAL = SQLite floating-point. Null for runs that haven't
+        // reported any cost yet; DAG executor updates this as nodes
+        // finish. See phase-3A of the cheatsheet improvement roadmap.
+        this.db.run('ALTER TABLE remote_agent_workflow_runs ADD COLUMN total_cost_usd REAL');
+      }
     } catch (e: unknown) {
       getLog().warn({ err: e as Error }, 'db.sqlite_migration_workflow_runs_columns_failed');
     }
@@ -322,7 +329,8 @@ export class SqliteAdapter implements IDatabase {
         started_at TEXT DEFAULT (datetime('now')),
         completed_at TEXT,
         last_activity_at TEXT DEFAULT (datetime('now')),
-        working_path TEXT
+        working_path TEXT,
+        total_cost_usd REAL
       );
 
       -- Workflow events table

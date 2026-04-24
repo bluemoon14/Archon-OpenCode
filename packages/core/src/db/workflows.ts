@@ -435,6 +435,38 @@ export async function getWorkflowRunByWorkerPlatformId(
  * - Merges metadata with existing (does not replace)
  * - No-op if updates object is empty
  */
+/**
+ * Set the running cost total for a workflow run. Called once per node
+ * that reports a `cost_usd`. Does NOT auto-set `completed_at` — this is
+ * a mid-run rollup update, not a terminal transition.
+ *
+ * Intentionally accepts only non-negative numbers — a negative rollup is
+ * always a bug (costs only accumulate). Zero is allowed because some
+ * nodes cost nothing (bash / script) but still want to surface that.
+ */
+export async function updateWorkflowRunCost(id: string, totalCostUsd: number): Promise<void> {
+  if (!Number.isFinite(totalCostUsd) || totalCostUsd < 0) {
+    throw new Error(
+      `updateWorkflowRunCost: invalid totalCostUsd=${String(totalCostUsd)} for run ${id}`
+    );
+  }
+  try {
+    const result = await pool.query(
+      'UPDATE remote_agent_workflow_runs SET total_cost_usd = $1 WHERE id = $2',
+      [totalCostUsd, id]
+    );
+    if (result.rowCount === 0) {
+      getLog().warn({ workflowRunId: id }, 'db.workflow_run_cost_update_no_match');
+      throw new Error(`Workflow run not found (id: ${id})`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Workflow run not found')) throw error;
+    const err = error as Error;
+    getLog().error({ err }, 'db.workflow_run_cost_update_failed');
+    throw new Error(`Failed to update workflow run cost: ${err.message}`);
+  }
+}
+
 export async function updateWorkflowRun(
   id: string,
   updates: Partial<Pick<WorkflowRun, 'status' | 'metadata'>>

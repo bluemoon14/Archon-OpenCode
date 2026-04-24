@@ -103,6 +103,13 @@ export const workflowRunSchema = z.object({
   completed_at: z.date().nullable(),
   last_activity_at: z.date().nullable(),
   working_path: z.string().nullable(),
+  /**
+   * Running sum of per-node `cost_usd` values across every node executed
+   * so far. Updated incrementally as nodes complete. `null` until the
+   * first node that reports a cost (most bash / script nodes never will).
+   * Used to enforce whole-workflow budget caps and for reporting.
+   */
+  total_cost_usd: z.number().nonnegative().nullable().optional(),
 });
 
 export type WorkflowRun = z.infer<typeof workflowRunSchema>;

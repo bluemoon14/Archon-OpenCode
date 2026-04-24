@@ -252,6 +252,50 @@ describe('substituteWorkflowVariables', () => {
     );
     expect(prompt).toBe('Fix: ');
   });
+
+  it('substitutes $PARAM_<name> from namedParams', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Target branch: $PARAM_target_branch; skip review: $PARAM_skip_review',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      'docs/',
+      undefined,
+      undefined,
+      undefined,
+      { target_branch: 'dev', skip_review: 'true' }
+    );
+    expect(prompt).toBe('Target branch: dev; skip review: true');
+  });
+
+  it('collapses unset $PARAM_<name> to empty string', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Target: $PARAM_unset_param end',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      'docs/',
+      undefined,
+      undefined,
+      undefined,
+      { other: 'x' }
+    );
+    expect(prompt).toBe('Target:  end');
+  });
+
+  it('strips $PARAM_<name> placeholders even when namedParams is undefined', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Value: $PARAM_missing done',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      'docs/'
+    );
+    expect(prompt).toBe('Value:  done');
+  });
 });
 
 describe('buildPromptWithContext', () => {

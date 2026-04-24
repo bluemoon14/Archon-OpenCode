@@ -54,6 +54,34 @@ export const workflowBaseSchema = z.object({
   betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
   sandbox: sandboxSettingsSchema.optional(),
   worktree: workflowWorktreePolicySchema.optional(),
+  /**
+   * Whole-workflow cost cap in USD. Accumulates across every node in the
+   * run; as soon as the running total exceeds this value, the run fails
+   * with a clear error. Per-node `maxBudgetUsd` (on DAG nodes) is orthogonal
+   * — a node can have its own cap and the whole-workflow cap wins whichever
+   * is tighter at any given moment.
+   */
+  maxWorkflowCostUsd: z.number().positive().optional(),
+  /**
+   * Named workflow parameters. Each entry declares a parameter accessible
+   * as `$PARAM_<key>` in any node's prompt / bash / script text. The CLI's
+   * `--param key=value` flag supplies values at invocation time. If a
+   * parameter declares `required: true` and no value is provided (via CLI
+   * or `default`), the workflow fails to start with a clear error.
+   *
+   * Kept flat on purpose — nested `parameters.<name>.type/enum/choices`
+   * can come later; v1 is strings only.
+   */
+  parameters: z
+    .record(
+      z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'parameter name must be a valid identifier'),
+      z.object({
+        description: z.string().min(1).optional(),
+        required: z.boolean().optional(),
+        default: z.string().optional(),
+      })
+    )
+    .optional(),
 });
 
 export type WorkflowBase = z.infer<typeof workflowBaseSchema>;

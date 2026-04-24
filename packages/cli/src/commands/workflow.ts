@@ -68,6 +68,13 @@ export interface WorkflowRunOptions {
   verbose?: boolean;
   /** Platform conversation ID (e.g. `cli-{ts}-{rand}`), NOT a DB UUID. */
   conversationId?: string;
+  /**
+   * Named parameter overrides from `--param name=value` CLI flags (or
+   * MCP equivalent). Merged with the workflow's `parameters.*.default`;
+   * missing required params fail the run with a clean error before any
+   * node executes.
+   */
+  params?: Record<string, string>;
 }
 
 /**
@@ -701,7 +708,12 @@ export async function workflowRunCommand(
       workflow,
       userMessage,
       conversation.id,
-      codebase?.id
+      codebase?.id,
+      undefined, // issueContext
+      undefined, // isolationContext
+      undefined, // parentConversationId
+      undefined, // preCreatedRun
+      options.params
     );
   } finally {
     unsubscribe?.();

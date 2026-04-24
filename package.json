@@ -15,6 +15,7 @@
     "generate:bundled": "bun run scripts/generate-bundled-defaults.ts",
     "check:bundled": "bun run scripts/generate-bundled-defaults.ts --check",
     "test": "bun --filter '@archon/*' --parallel test",
+    "test:integration": "ARCHON_LITELLM_SMOKE=1 ARCHON_MCP_SMOKE=1 bun test packages/providers/src/litellm/litellm.integration.test.ts packages/cli/src/mcp/mcp.integration.test.ts",
     "type-check": "bun --filter '@archon/*' type-check && bun x tsc --noEmit -p scripts/tsconfig.json",
     "lint": "bun x eslint . --cache",
     "lint:fix": "bun x eslint . --cache --fix",

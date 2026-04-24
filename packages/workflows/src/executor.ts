@@ -10,6 +10,7 @@ import { createLogger } from '@archon/paths';
 import { getDefaultBranch, toRepoPath } from '@archon/git';
 import type { WorkflowDefinition, WorkflowRun, WorkflowExecutionResult } from './schemas';
 import { executeDagWorkflow } from './dag-executor';
+import { resolveWorkflowParameters } from './workflow-parameters';
 import { logWorkflowStart, logWorkflowError } from './logger';
 import { formatDuration, parseDbTimestamp } from './utils/duration';
 import { getWorkflowEventEmitter } from './event-emitter';
@@ -244,7 +245,14 @@ export async function executeWorkflow(
     prBranch?: string;
   },
   parentConversationId?: string,
-  preCreatedRun?: WorkflowRun
+  preCreatedRun?: WorkflowRun,
+  /**
+   * User-supplied CLI `--param name=value` map. Merged with the workflow's
+   * `parameters.*.default` declarations via `resolveWorkflowParameters`;
+   * missing required params short-circuit with a clear error before any
+   * DAG execution.
+   */
+  cliParams?: Record<string, string>
 ): Promise<WorkflowExecutionResult> {
   // Load config once for the entire workflow execution
   const fileConfig = await deps.loadConfig(cwd);
@@ -723,13 +731,26 @@ export async function executeWorkflow(
       // Continue anyway - workflow is already recorded in database
     }
 
+    // Resolve named parameters (defaults + CLI overrides) BEFORE the DAG
+    // runs so required-param validation short-circuits with a clean error.
+    // `resolveWorkflowParameters` throws WorkflowParameterError listing every
+    // missing required param; we surface that as the run's failure reason.
+    let namedParams: Record<string, string>;
+    try {
+      namedParams = resolveWorkflowParameters(workflow, cliParams ?? {});
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await deps.store.failWorkflowRun(workflowRun.id, msg);
+      return { success: false, workflowRunId: workflowRun.id, error: msg };
+    }
+
     // Execute the DAG workflow
     const dagSummary = await executeDagWorkflow(
       deps,
       platform,
       conversationId,
       cwd,
-      workflow,
+      { ...workflow, namedParams },
       workflowRun,
       resolvedProvider,
       resolvedModel,

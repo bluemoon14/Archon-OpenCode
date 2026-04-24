@@ -288,7 +288,14 @@ export function substituteWorkflowVariables(
   docsDir: string,
   issueContext?: string,
   loopUserInput?: string,
-  rejectionReason?: string
+  rejectionReason?: string,
+  /**
+   * Workflow-level named parameters declared via the `parameters:` field in
+   * workflow YAML. Each key maps to a `$PARAM_<key>` placeholder that can
+   * appear anywhere in node prompts / bash / script text. Values are raw
+   * strings — no further templating is done.
+   */
+  namedParams?: Record<string, string>
 ): { prompt: string; contextSubstituted: boolean } {
   // Fail fast if the prompt references $BASE_BRANCH but no base branch could be resolved
   if (!baseBranch && prompt.includes('$BASE_BRANCH')) {
@@ -311,6 +318,21 @@ export function substituteWorkflowVariables(
     .replace(/\$DOCS_DIR/g, resolvedDocsDir)
     .replace(/\$LOOP_USER_INPUT/g, loopUserInput ?? '')
     .replace(/\$REJECTION_REASON/g, rejectionReason ?? '');
+
+  // Named workflow parameters — $PARAM_<key>. Matched with a permissive
+  // identifier regex; unset params collapse to the empty string so a
+  // missing --param doesn't leave a literal $PARAM_foo in the rendered
+  // prompt (which would confuse the AI). Required-param validation lives
+  // at workflow load time — by the time we get here, any missing entries
+  // are intentional blanks.
+  if (namedParams !== undefined) {
+    result = result.replace(/\$PARAM_([A-Za-z_][A-Za-z0-9_]*)/g, (_m, key: string) => {
+      return namedParams[key] ?? '';
+    });
+  } else {
+    // Even without params, strip placeholders so the AI never sees them.
+    result = result.replace(/\$PARAM_([A-Za-z_][A-Za-z0-9_]*)/g, '');
+  }
 
   // Check if context variables exist (use fresh regex to avoid lastIndex issues)
   const hasContextVariables = new RegExp(CONTEXT_VAR_PATTERN_STR).test(result);
@@ -356,7 +378,8 @@ export function buildPromptWithContext(
   baseBranch: string,
   docsDir: string,
   issueContext: string | undefined,
-  logLabel: string
+  logLabel: string,
+  namedParams?: Record<string, string>
 ): string {
   const { prompt, contextSubstituted } = substituteWorkflowVariables(
     template,
@@ -365,7 +388,10 @@ export function buildPromptWithContext(
     artifactsDir,
     baseBranch,
     docsDir,
-    issueContext
+    issueContext,
+    undefined,
+    undefined,
+    namedParams
   );
 
   if (issueContext && !contextSubstituted) {
