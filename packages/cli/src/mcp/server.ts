@@ -30,6 +30,7 @@ import {
   gatherSkillsList,
 } from '../commands/registry-data';
 import { resumeWorkflow, runWorkflow, statusWorkflow } from './tools/workflow';
+import { invokeAgent, invokeSkill } from './tools/invoke';
 
 let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
@@ -40,6 +41,9 @@ function getLog(): ReturnType<typeof createLogger> {
 export interface ArchonMcpServerOptions {
   /** Repo root passed to every registry read. Defaults to `process.cwd()`. */
   cwd?: string;
+  /** Default assistant model for invoke tools when the resolver exhausts every
+   *  other tier. Defaults to 'sonnet' (the Claude SDK back-compat shorthand). */
+  defaultAssistant?: string;
 }
 
 /**
@@ -48,6 +52,7 @@ export interface ArchonMcpServerOptions {
  */
 export function createArchonMcpServer(opts: ArchonMcpServerOptions = {}): McpServer {
   const cwd = opts.cwd ?? process.cwd();
+  const defaultAssistant = opts.defaultAssistant ?? 'sonnet';
   const server = new McpServer({
     name: 'archon',
     version: '1.0.0',
@@ -195,6 +200,70 @@ export function createArchonMcpServer(opts: ArchonMcpServerOptions = {}): McpSer
     async input => {
       try {
         const out = await statusWorkflow(input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    'archon_skill_invoke',
+    {
+      description:
+        'One-shot: run a named skill against a user prompt. The skill body is injected as a ' +
+        'system-prompt contribution + the prompt is the user turn. Provider + model come from ' +
+        'the 8-tier resolver (optionally overridden via `model`). Returns {assistantText, ' +
+        'model, tokens, ...}.',
+      inputSchema: {
+        name: z.string().describe('Skill name (kebab-case)'),
+        prompt: z.string().describe('User prompt to run the skill against'),
+        model: z
+          .string()
+          .optional()
+          .describe('Per-call model override (wins over models.yaml + frontmatter)'),
+      },
+    },
+    async input => {
+      try {
+        const out = await invokeSkill(input, cwd, defaultAssistant);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    'archon_agent_invoke',
+    {
+      description:
+        'One-shot: run a named agent (e.g. `code-reviewer`) against a user prompt. Same shape ' +
+        'as `archon_skill_invoke` but uses the agent body as the subagent system prompt and ' +
+        "forwards the agent's tools + maxTurns when set.",
+      inputSchema: {
+        name: z.string().describe('Agent name (kebab-case)'),
+        prompt: z.string().describe('User prompt to run the agent against'),
+        model: z.string().optional().describe('Per-call model override'),
+      },
+    },
+    async input => {
+      try {
+        const out = await invokeAgent(input, cwd, defaultAssistant);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
         };

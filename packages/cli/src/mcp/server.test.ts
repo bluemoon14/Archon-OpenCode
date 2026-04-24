@@ -44,7 +44,7 @@ async function callTool(
 }
 
 describe('createArchonMcpServer', () => {
-  test('registers every documented tool (5 discovery + 3 workflow)', () => {
+  test('registers every documented tool (5 discovery + 3 workflow + 2 invoke)', () => {
     const server = createArchonMcpServer({ cwd: process.cwd() });
     const tools = getTools(server);
     for (const name of [
@@ -56,6 +56,8 @@ describe('createArchonMcpServer', () => {
       'archon_workflow_run',
       'archon_workflow_status',
       'archon_workflow_resume',
+      'archon_skill_invoke',
+      'archon_agent_invoke',
     ]) {
       expect(tools.has(name)).toBe(true);
     }
@@ -150,5 +152,25 @@ describe('createArchonMcpServer', () => {
     });
     expect(isError).toBe(true);
     expect(text.length).toBeGreaterThan(0);
+  });
+
+  test('archon_skill_invoke with an unknown skill name returns an error envelope', async () => {
+    const server = createArchonMcpServer({ cwd: process.cwd() });
+    const { isError, text } = await callTool(server, 'archon_skill_invoke', {
+      name: 'no-such-skill',
+      prompt: 'test',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('not found');
+  });
+
+  test('archon_agent_invoke with an unknown agent name returns an error envelope', async () => {
+    const server = createArchonMcpServer({ cwd: process.cwd() });
+    const { isError, text } = await callTool(server, 'archon_agent_invoke', {
+      name: 'no-such-agent',
+      prompt: 'test',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('not found');
   });
 });
