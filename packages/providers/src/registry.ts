@@ -18,6 +18,8 @@ import { ClaudeProvider } from './claude/provider';
 import { CLAUDE_CAPABILITIES } from './claude/capabilities';
 import { OpenCodeProvider } from './opencode/provider';
 import { OPENCODE_CAPABILITIES } from './opencode/capabilities';
+import { PydanticProvider } from './pydantic/provider';
+import { PYDANTIC_CAPABILITIES } from './pydantic/capabilities';
 import { UnknownProviderError } from './errors';
 import { createLogger } from '@archon/paths';
 
@@ -134,6 +136,16 @@ export function registerBuiltinProviders(): void {
         if (model.startsWith('claude-') || model === 'inherit') return false;
         return /^[a-z][a-z0-9_-]*\/.+/i.test(model);
       },
+      builtIn: true,
+    },
+    {
+      id: 'pydantic',
+      displayName: 'Pydantic AI (BYO)',
+      factory: () => new PydanticProvider(),
+      capabilities: PYDANTIC_CAPABILITIES,
+      // Selection must be explicit via `provider: pydantic` + `agent: <name>`.
+      // No model-name routing — Pydantic agents pick their own upstream.
+      isModelCompatible: (): boolean => false,
       builtIn: true,
     },
   ];

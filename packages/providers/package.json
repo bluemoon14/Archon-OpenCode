@@ -13,6 +13,9 @@
     "./opencode/provider": "./src/opencode/provider.ts",
     "./opencode/config": "./src/opencode/config.ts",
     "./opencode/binary-resolver": "./src/opencode/binary-resolver.ts",
+    "./pydantic/provider": "./src/pydantic/provider.ts",
+    "./pydantic/config": "./src/pydantic/config.ts",
+    "./pydantic/python-resolver": "./src/pydantic/python-resolver.ts",
     "./errors": "./src/errors.ts",
     "./registry": "./src/registry.ts"
   },

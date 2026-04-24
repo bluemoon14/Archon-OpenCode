@@ -32,10 +32,12 @@ export { UnknownProviderError, ProviderError, type ProviderErrorCode } from './e
 // Provider classes
 export { ClaudeProvider } from './claude/provider';
 export { OpenCodeProvider } from './opencode/provider';
+export { PydanticProvider } from './pydantic/provider';
 
 // Config parsers
 export { parseClaudeConfig, type ClaudeProviderDefaults } from './claude/config';
 export { parseOpenCodeConfig, parseOpenCodeModel, resolveOpencodeAuthEnv } from './opencode/config';
+export { parsePydanticConfig, resolveAgentEntry } from './pydantic/config';
 export type { OpenCodeProviderDefaults, PydanticProviderDefaults } from './types';
 
 // Utilities (needed by consumers)
@@ -44,3 +46,4 @@ export {
   resolveOpencodeBinaryPath,
   fileExists as opencodeFileExists,
 } from './opencode/binary-resolver';
+export { resolveUvBinaryPath, fileExists as pydanticFileExists } from './pydantic/python-resolver';
