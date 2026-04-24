@@ -127,6 +127,29 @@ describe('bundled-defaults', () => {
         expect(content.includes('nodes:')).toBe(true);
       }
     });
+
+    it('the bundled `feature` workflow chains brainstorm → plan → approval → implement → review → finish and references superpowers skills + the code-reviewer agent', () => {
+      const content = BUNDLED_WORKFLOWS.feature;
+      expect(content).toBeDefined();
+      // Node IDs in order
+      for (const id of ['brainstorm', 'plan', 'approval-gate', 'implement', 'review', 'finish']) {
+        expect(content).toContain(`id: ${id}`);
+      }
+      // Skill / agent references from the vendored superpowers library
+      for (const skill of [
+        'brainstorming',
+        'writing-plans',
+        'executing-plans',
+        'test-driven-development',
+        'finishing-a-development-branch',
+      ]) {
+        expect(content).toContain(skill);
+      }
+      expect(content).toContain('code-reviewer');
+      // Approval gate uses Archon's native shape
+      expect(content).toContain('approval:');
+      expect(content).toContain('capture_response: true');
+    });
   });
 
   describe('BUNDLED_SKILLS', () => {
