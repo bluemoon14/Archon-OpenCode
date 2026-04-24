@@ -16,18 +16,21 @@
     "./pydantic/provider": "./src/pydantic/provider.ts",
     "./pydantic/config": "./src/pydantic/config.ts",
     "./pydantic/python-resolver": "./src/pydantic/python-resolver.ts",
+    "./litellm/provider": "./src/litellm/provider.ts",
+    "./litellm/config": "./src/litellm/config.ts",
     "./errors": "./src/errors.ts",
     "./registry": "./src/registry.ts"
   },
   "scripts": {
-    "test": "bun test src/claude/provider.test.ts && bun test src/registry.test.ts && bun test src/claude/binary-resolver.test.ts && bun test src/claude/binary-resolver-dev.test.ts && bun test src/opencode/event-mapper.test.ts src/opencode/config.test.ts && bun test src/pydantic/config.test.ts src/pydantic/bridge-client.test.ts",
+    "test": "bun test src/claude/provider.test.ts && bun test src/registry.test.ts && bun test src/claude/binary-resolver.test.ts && bun test src/claude/binary-resolver-dev.test.ts && bun test src/opencode/event-mapper.test.ts src/opencode/config.test.ts && bun test src/pydantic/config.test.ts src/pydantic/bridge-client.test.ts && bun test src/litellm/",
     "type-check": "bun x tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.89",
     "@archon/paths": "workspace:*",
     "@opencode-ai/sdk": "^1.14.22",
-    "@sinclair/typebox": "^0.34.41"
+    "@sinclair/typebox": "^0.34.41",
+    "openai": "^4.104.0"
   },
   "devDependencies": {
     "pino": "^9"

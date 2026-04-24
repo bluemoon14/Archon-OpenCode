@@ -1,33 +1,45 @@
 /**
- * LiteLLM agent provider — STUB.
+ * LiteLLM agent provider.
  *
- * Scaffolding committed ahead of the full implementation so the provider can
- * register in the built-in registry and claim its model prefixes (see
- * registry.ts + ./config.ts LITELLM_MODEL_PREFIXES). This unblocks the
- * model-routing layer: workflows referencing `openai/gpt-4o`, `azure_ai/...`,
- * `novita/...`, or `anthropic/...` (when Claude SDK isn't preferred) can be
- * parsed and validated without the sendQuery runtime yet shipping.
+ * Routes requests through a LiteLLM proxy (OpenAI-compatible HTTP). Archon
+ * spawns + reuses one proxy subprocess per process (see ./proxy.ts), or
+ * points at a user-managed instance when `assistants.litellm.baseUrl` is set.
  *
- * Remaining work (tracked on the integration plan):
- *   - Spawn + ref-count the `litellm` proxy subprocess (OpenCode pattern in
- *     provider.ts:52-104 is the closest analog).
- *   - Translate OpenAI chat/completions stream → MessageChunk union.
- *   - Wire `assistants.litellm.baseUrl` as the escape-hatch for externally
- *     managed proxies.
- *   - Honor `options.fallbackModel` via per-request `fallbacks:` param.
+ * Scope (MVP):
+ *   - Plain text chat completions with streaming.
+ *   - `resolvedSkills` + `resolvedAgents` from the registry are delivered as
+ *     system-prompt content (no native subagent support on LiteLLM).
+ *   - `options.systemPrompt` is honored.
+ *   - `options.fallbackModel` is forwarded as LiteLLM's per-request
+ *     `fallbacks: [<model>]` body extension.
  *
- * Until sendQuery is implemented, invoking a LiteLLM-routed node throws a
- * clear `not_yet_implemented` error — the registry still honors the
- * isModelCompatible contract so schema validation / routing works.
+ * Deferred (tracked on the integration plan):
+ *   - Tool / function calling (OpenAI function calls + structured tool_use
+ *     translation to Archon's `tool` / `tool_result` chunks).
+ *   - Structured output / JSON schema via response_format.
+ *   - Per-request cost ceiling + max tokens.
  */
+import OpenAI from 'openai';
+import { createLogger } from '@archon/paths';
 import type {
   IAgentProvider,
   MessageChunk,
   ProviderCapabilities,
+  ResolvedAgentHandoff,
+  ResolvedSkillHandoff,
   SendQueryOptions,
 } from '../types';
 import { ProviderError } from '../errors';
 import { LITELLM_CAPABILITIES } from './capabilities';
+import { parseLiteLLMConfig } from './config';
+import { getOrStartProxy } from './proxy';
+import { translateOpenAIStream } from './stream';
+
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('provider.litellm');
+  return cachedLog;
+}
 
 export class LiteLLMProvider implements IAgentProvider {
   getType(): string {
@@ -38,19 +50,166 @@ export class LiteLLMProvider implements IAgentProvider {
     return LITELLM_CAPABILITIES;
   }
 
-  // eslint-disable-next-line require-yield
   async *sendQuery(
-    _prompt: string,
+    prompt: string,
     _cwd: string,
     _resumeSessionId?: string,
-    _options?: SendQueryOptions
+    options?: SendQueryOptions
   ): AsyncGenerator<MessageChunk> {
-    throw new ProviderError(
-      'litellm',
-      'subprocess_crash',
-      'LiteLLM provider runtime not yet implemented. Scaffolding only — model ' +
-        'routing + isModelCompatible work, but sendQuery will land in a follow-up. ' +
-        "See ~/.claude/plans/resilient-coalescing-hickey.md §C ('Increment 3b')."
+    const cfg = parseLiteLLMConfig(options?.assistantConfig);
+    const model = options?.model ?? cfg.model;
+    if (model === undefined || model.length === 0) {
+      throw new ProviderError(
+        'litellm',
+        'unknown',
+        'LiteLLM requires a model — set `model:` on the workflow node or `assistants.litellm.model` in .archon/config.yaml.'
+      );
+    }
+
+    // Bring the proxy online (or use external baseUrl). Throws ProviderError
+    // on spawn failure with stderr tail attached.
+    const proxy = await getOrStartProxy({
+      configPath: cfg.configPath ?? defaultConfigPath(),
+      port: cfg.port,
+      binaryPath: cfg.litellmBinaryPath,
+      baseUrl: cfg.baseUrl,
+      env: options?.env,
+    });
+
+    const apiKey = process.env[cfg.masterKeyEnv];
+    if (apiKey === undefined || apiKey.length === 0) {
+      throw new ProviderError(
+        'litellm',
+        'auth',
+        `LiteLLM master key not found in env var '${cfg.masterKeyEnv}'. Set it in ~/.archon/.env or export it before invoking archon.`
+      );
+    }
+
+    const client = new OpenAI({ baseURL: proxy.baseUrl, apiKey });
+
+    const messages = buildMessages({
+      systemPrompt: options?.systemPrompt,
+      userPrompt: prompt,
+      resolvedSkills: options?.resolvedSkills,
+      resolvedAgents: options?.resolvedAgents,
+    });
+
+    // LiteLLM passthrough: `fallbacks` is a first-class LiteLLM extension on
+    // the standard OpenAI body. The OpenAI SDK forwards unknown fields.
+    const body: Record<string, unknown> = {
+      model,
+      messages,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+    if (options?.fallbackModel) {
+      body.fallbacks = [options.fallbackModel];
+    }
+
+    getLog().info(
+      {
+        model,
+        fallback: options?.fallbackModel,
+        skills: options?.resolvedSkills?.map(s => s.name),
+        agents: options?.resolvedAgents?.map(a => a.id),
+      },
+      'litellm.query_started'
+    );
+
+    let stream: Awaited<ReturnType<typeof client.chat.completions.create>>;
+    try {
+      stream = await client.chat.completions.create(
+        body as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+        { signal: options?.abortSignal }
+      );
+    } catch (err) {
+      throw toProviderError(err);
+    }
+
+    try {
+      yield* translateOpenAIStream(
+        stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
+        { model }
+      );
+    } catch (err) {
+      throw toProviderError(err);
+    } finally {
+      getLog().info({ model }, 'litellm.query_completed');
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
+interface BuildMessagesInput {
+  systemPrompt?: string;
+  userPrompt: string;
+  resolvedSkills?: ResolvedSkillHandoff[];
+  resolvedAgents?: ResolvedAgentHandoff[];
+}
+
+function buildMessages(
+  input: BuildMessagesInput
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+
+  const systemParts: string[] = [];
+  if (input.systemPrompt !== undefined && input.systemPrompt.length > 0) {
+    systemParts.push(input.systemPrompt);
+  }
+  if (input.resolvedSkills !== undefined && input.resolvedSkills.length > 0) {
+    const skillsBlock = input.resolvedSkills
+      .map(s => `## Skill: ${s.name}\n\n${s.description}\n\n${s.body}`)
+      .join('\n\n---\n\n');
+    systemParts.push(
+      `You have the following preloaded skills. Use them when relevant to the task:\n\n${skillsBlock}`
     );
   }
+  if (input.resolvedAgents !== undefined && input.resolvedAgents.length > 0) {
+    // LiteLLM has no native subagent concept — surface agent prompts as
+    // additional system-prompt sections so the model gets the context.
+    const agentsBlock = input.resolvedAgents
+      .map(a => `## Available sub-agent: ${a.id}\n\n${a.description}\n\n${a.prompt}`)
+      .join('\n\n---\n\n');
+    systemParts.push(
+      `The following sub-agent personas are available. Incorporate their perspectives when appropriate:\n\n${agentsBlock}`
+    );
+  }
+
+  if (systemParts.length > 0) {
+    messages.push({ role: 'system', content: systemParts.join('\n\n---\n\n') });
+  }
+  messages.push({ role: 'user', content: input.userPrompt });
+  return messages;
+}
+
+function defaultConfigPath(): string {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  return `${home}/.archon/litellm_config.yaml`;
+}
+
+function toProviderError(err: unknown): ProviderError {
+  if (err instanceof ProviderError) return err;
+
+  const message = err instanceof Error ? err.message : String(err);
+  const cause = err instanceof Error ? err : undefined;
+
+  // OpenAI SDK typed errors
+  if (err !== null && typeof err === 'object' && 'status' in err) {
+    const status = (err as { status?: number }).status;
+    if (status === 401 || status === 403) {
+      return new ProviderError('litellm', 'auth', message, cause);
+    }
+    if (status === 429) {
+      return new ProviderError('litellm', 'rate_limit', message, cause);
+    }
+  }
+
+  if (err instanceof Error && err.name === 'AbortError') {
+    return new ProviderError('litellm', 'timeout', message, err);
+  }
+
+  return new ProviderError('litellm', 'unknown', message, cause);
 }
