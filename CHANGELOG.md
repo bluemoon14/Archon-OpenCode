@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Superpowers + LiteLLM integration
+
+Every skill/agent user flow + LLM provider abstraction needed to hit the
+"ultimate code-generation control plane" goal: drive Claude Code / OpenCode /
+Pydantic AI with one content library, one model manifest, and one tool
+namespace.
+
+**Skills + agents** (vendored from [obra/superpowers](https://github.com/obra/superpowers)):
+
+- 14 skills bundled into the binary: `brainstorming`, `dispatching-parallel-agents`, `executing-plans`, `finishing-a-development-branch`, `receiving-code-review`, `requesting-code-review`, `subagent-driven-development`, `systematic-debugging`, `test-driven-development`, `using-git-worktrees`, `using-superpowers`, `verification-before-completion`, `writing-plans`, `writing-skills`.
+- 1 bundled agent: `code-reviewer`.
+- 3-tier override chain: bundled < `~/.archon/{skills,agents}/` < `<repo>/.archon/{skills,agents}/`.
+- CLI: `archon skills list|show`, `archon agents list|show`.
+
+**Per-skill / per-agent model selection:**
+
+- Central `models.yaml` manifest with opinionated bundled defaults (haiku/sonnet/opus per skill) + `fast`/`balanced`/`smart` aliases.
+- 8-tier resolver: `override > project > global > bundled > frontmatter > category-default > owner-node > defaultAssistant`.
+- CLI: `archon models list|set|reset|validate`.
+
+**LiteLLM as fourth provider:**
+
+- New `litellm` provider claims canonical upstream prefixes: `anthropic/`, `openai/`, `azure/`, `azure_ai/`, `novita/`. Claude SDK still wins `anthropic/*` by default (preferred when `claude` binary installed); `provider: litellm` forces routing through proxy.
+- Features: streaming chat completions, tool/function calling, structured output (JSON schema), per-request cost ceiling (`max_budget`), fallback model chaining.
+- `archon setup` scaffolds `~/.archon/litellm_config.yaml` with 4 upstream rows (Anthropic / OpenAI / Azure AI Foundry / Novita) using `os.environ/*` placeholders — no secrets in YAML.
+- Proxy subprocess is a module-level singleton; concurrent `sendQuery` calls share the spawn (serialized via in-flight promise lock). Pinned version per security rationale in `docs/litellm.md`.
+
+**OpenCode + Pydantic routing through LiteLLM:**
+
+- `archon setup` for OpenCode offers a LiteLLM fast-path: skips per-upstream multiselect, emits config pointing at `http://localhost:4000` with `authTokenEnv: LITELLM_MASTER_KEY`.
+- Pydantic scaffolding tip shows `OpenAIModel(base_url=..., api_key=...)` pattern for BYO agents.
+- All three non-Claude runtimes receive `resolvedSkills` + `resolvedAgents` handoffs from the registry — skill/agent bodies work on every provider.
+
+**MCP server — Archon as a tool provider:**
+
+- `archon mcp serve` — stdio MCP server exposing 10 tools:
+  - Discovery: `archon_skills_list`, `archon_skills_show`, `archon_agents_list`, `archon_agents_show`, `archon_models_list`
+  - Workflow control: `archon_workflow_run`, `archon_workflow_status`, `archon_workflow_resume`
+  - One-shot invocation: `archon_skill_invoke`, `archon_agent_invoke`
+- Clients (Claude Code / OpenCode) wire via `mcp.json` — outer AI can call Archon natively without dropping to shell.
+- Deliberately omits `models_set`/`models_reset` MCP tools — outer AI silently rewriting routing config is too risky. Users fall back to `archon models set` via shell tool.
+
+**Bundled `feature` workflow:**
+
+- New bundled default chaining: `brainstorm → plan → [approval] → implement → review → finish`.
+- Uses inline `prompt:` + `skills:` / `agents:` references — no extra command files. Showcases the whole integration end-to-end. `archon workflow run feature "add dark mode"`.
+
+**New docs:** `docs/skills-and-agents.md`, `docs/litellm.md`, `docs/mcp.md`, plus an updated `CLAUDE.md` provider section.
+
+**Internals:**
+
+- `SkillAgentRegistry` interface + `createSkillAgentRegistry` factory on `@archon/workflows/skill-agent-registry`.
+- `ResolvedSkillHandoff` / `ResolvedAgentHandoff` types on `@archon/providers/types` — the contract providers use to receive resolved content.
+- `resolveNodeContent` in `@archon/workflows/resolve-node-content` — pure function that the DAG executor calls per-node to produce the handoff arrays.
+- `SkillNotFoundError` / `AgentNotFoundError` — narrow error classes so the resolver can distinguish "skill missing" (skip silently) from real load failures (bubble).
+- `models.yaml` parse errors now include the full file path (bundled/global/project scope labels replaced with the actual filesystem path).
+
 ## [0.3.9] - 2026-04-22
 
 First release with working compiled binaries since v0.3.6. Both v0.3.7 and v0.3.8 were tagged but neither shipped release assets — v0.3.7 was blocked by two genuine binary-runtime bugs (Pi SDK's module-init crash + Bun `--bytecode` producing broken output), and v0.3.8 was blocked by an unrelated CI smoke-test regression where `release.yml`'s Claude resolver test required an `origin` remote that the fresh `git init` test repo didn't have. Both superseded tags remain for history; their GitHub Releases were deleted at the time of tagging so `releases/latest` fell back to v0.3.6 throughout, keeping `install.sh` and Homebrew safe. v0.3.9 is what users actually install.

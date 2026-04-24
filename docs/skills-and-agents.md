@@ -221,3 +221,37 @@ result goes onto `SendQueryOptions.resolvedSkills` / `resolvedAgents` —
 providers consume those directly and never re-load from disk. This is why
 bundled content works on every runtime, regardless of whether the user has
 `~/.claude/skills/` installed or OpenCode's own skill system enabled.
+
+---
+
+## The bundled `feature` workflow
+
+The canonical end-to-end demonstration of this system ships as a bundled
+workflow. Read it at `.archon/workflows/defaults/feature.yaml` or run it:
+
+```bash
+archon workflow run feature "add a dark-mode toggle"
+```
+
+Chain:
+
+1. **brainstorm** — skill: `brainstorming` (haiku). Clarifies scope; writes
+   spec to `$ARTIFACTS_DIR/spec.md`.
+2. **plan** — skill: `writing-plans` (opus). Reads the spec, writes a
+   detailed implementation plan to `$ARTIFACTS_DIR/plan.md`.
+3. **approval-gate** — human review of the plan. Comments captured via
+   `capture_response: true` and substituted into the next step as
+   `$approval-gate.output`.
+4. **implement** — skills: `executing-plans` + `test-driven-development`
+   (sonnet). TDD-style execution of the plan with human feedback in context.
+5. **review** — agent: `code-reviewer` (opus). Reviews the diff against the
+   plan; writes to `$ARTIFACTS_DIR/review.md`.
+6. **finish** — skill: `finishing-a-development-branch` (haiku). Opens a
+   PR attaching the plan + review, cleans the worktree.
+
+Every model assignment comes from the bundled `models.yaml`. Override any
+step's model with `archon models set skill <name> <model>` or by editing
+`.archon/models.yaml` directly.
+
+Copy-modify this workflow into `.archon/workflows/feature.yaml` (project
+tier) to customize. The project-tier file shadows the bundled version.
