@@ -28,8 +28,16 @@ import {
   gatherSkillDetail,
   gatherSkillsList,
 } from '../commands/registry-data';
-import { resumeWorkflow, runWorkflow, statusWorkflow } from './tools/workflow';
+import {
+  resumeWorkflow,
+  runWorkflow,
+  startWorkflow,
+  statusWorkflow,
+  workflowEvents,
+} from './tools/workflow';
 import { invokeAgent, invokeSkill } from './tools/invoke';
+import { assignAgentModel, assignSkillModel } from './tools/assign';
+import { planSession } from './tools/plan';
 
 // NOTE: no `@archon/paths.createLogger` here — the Pino logger writes to
 // stdout by default, which MCP reserves for JSON-RPC framing. Diagnostics
@@ -276,6 +284,76 @@ export function createArchonMcpServer(opts: ArchonMcpServerOptions = {}): McpSer
   );
 
   server.registerTool(
+    'archon_workflow_start',
+    {
+      description:
+        'Non-blocking variant of `archon_workflow_run`. Kicks off a workflow in the background ' +
+        'and returns {runId, status: "running", detached: true} as soon as the run record ' +
+        'exists (~100ms). Long-running workflows no longer hit MCP tool-call timeouts. ' +
+        'Poll via `archon_workflow_status(runId)` or tail events via `archon_workflow_events(runId)`. ' +
+        'Known limitation: if the MCP server disconnects mid-run the in-process execution dies — ' +
+        'recover with `archon workflow resume <runId>` from a shell.',
+      inputSchema: {
+        name: z.string().describe('Workflow name (matches `archon workflow list`)'),
+        args: z.string().optional().describe('Positional argument string ($ARGUMENTS)'),
+        branchName: z.string().optional().describe('Optional worktree branch override'),
+        noWorktree: z.boolean().optional().describe('Disable worktree isolation'),
+        params: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe('Named workflow parameters (equivalent to --param key=value on the CLI)'),
+      },
+    },
+    async input => {
+      try {
+        const out = await startWorkflow(input, cwd);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    'archon_workflow_events',
+    {
+      description:
+        'Tail events for a workflow run (polling). Returns {events[], latestIso}. Pass ' +
+        '`sinceIso` from the prior call to skip already-seen events. Event types include ' +
+        '`node_started`, `node_completed`, `workflow_completed`, etc.',
+      inputSchema: {
+        runId: z.string().describe('Workflow run ID'),
+        sinceIso: z
+          .string()
+          .optional()
+          .describe('ISO timestamp — only events after this are returned'),
+      },
+    },
+    async input => {
+      try {
+        const out = await workflowEvents(input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
     'archon_workflow_resume',
     {
       description:
@@ -289,6 +367,105 @@ export function createArchonMcpServer(opts: ArchonMcpServerOptions = {}): McpSer
     async input => {
       try {
         const out = await resumeWorkflow(input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // Models-mutation tools (Phase 4D) — require `confirm: true` to actually
+  // write. Without confirm, returns a preview — pattern protects against the
+  // outer AI silently rewriting the user's routing table.
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    'archon_skills_assign',
+    {
+      description:
+        "Assign a skill's model. Writes to `.archon/models.yaml` (project) or `~/.archon/" +
+        "models.yaml` (scope='global'). REQUIRES `confirm: true` to persist — without it, " +
+        'returns a preview of the intended change. Use this when the user explicitly asks to ' +
+        "reroute a skill; don't call it speculatively.",
+      inputSchema: {
+        name: z.string().describe('Skill name (kebab-case)'),
+        model: z.string().describe('Target model (LiteLLM canonical, Claude shorthand, or alias)'),
+        scope: z.enum(['project', 'global']).optional().describe('Default: project'),
+        confirm: z.boolean().optional().describe('Must be true to actually write'),
+      },
+    },
+    async input => {
+      try {
+        const out = await assignSkillModel(input, cwd);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    'archon_agents_assign',
+    {
+      description:
+        "Assign an agent's model. Same shape as `archon_skills_assign` — REQUIRES " +
+        '`confirm: true` to persist.',
+      inputSchema: {
+        name: z.string().describe('Agent name (kebab-case)'),
+        model: z.string().describe('Target model'),
+        scope: z.enum(['project', 'global']).optional(),
+        confirm: z.boolean().optional(),
+      },
+    },
+    async input => {
+      try {
+        const out = await assignAgentModel(input, cwd);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    'archon_plan_session',
+    {
+      description:
+        'Rank skills by relevance to a stated goal. Token-overlap scoring against each ' +
+        "skill's description (v1 — no LLM call). Use this BEFORE invoking skills so you " +
+        "pick the right ones; e.g. given 'my auth middleware is broken' it surfaces " +
+        "'systematic-debugging' + 'test-driven-development' before the user has to know " +
+        'they exist.',
+      inputSchema: {
+        goal: z.string().describe('What the user is trying to do (free-form, 1-3 sentences)'),
+        limit: z.number().int().positive().optional().describe('Max results (default 5)'),
+      },
+    },
+    async input => {
+      try {
+        const out = await planSession(input, cwd);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
         };

@@ -145,3 +145,48 @@ describe('getOrStartProxy — concurrent spawn serialization', () => {
     expect(h2.baseUrl).toContain('4100');
   });
 });
+
+describe('getOrStartProxy — config-mtime watch (Phase 4A)', () => {
+  let tmpConfigPath: string;
+
+  beforeEach(async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'archon-proxy-mtime-'));
+    tmpConfigPath = join(dir, 'litellm_config.yaml');
+    writeFileSync(tmpConfigPath, 'model_list: []\n', 'utf-8');
+  });
+
+  test('same-mtime cache hit skips respawn', async () => {
+    const h1 = await getOrStartProxy({ configPath: tmpConfigPath, port: 4200 });
+    const h2 = await getOrStartProxy({ configPath: tmpConfigPath, port: 4200 });
+    expect(h1).toBe(h2);
+    expect(spawnCalls).toHaveLength(1);
+  });
+
+  test('bumped mtime triggers respawn', async () => {
+    await getOrStartProxy({ configPath: tmpConfigPath, port: 4201 });
+    expect(spawnCalls).toHaveLength(1);
+
+    // Overwrite the config with a fresh mtime (add whitespace is enough).
+    const { writeFileSync, utimesSync } = await import('node:fs');
+    writeFileSync(tmpConfigPath, 'model_list: []\n# edited\n', 'utf-8');
+    // Bump the file's mtime explicitly by 2s so the `statSync(...).mtimeMs`
+    // comparison sees it even on filesystems with coarse mtime resolution.
+    const future = new Date(Date.now() + 2000);
+    utimesSync(tmpConfigPath, future, future);
+
+    await getOrStartProxy({ configPath: tmpConfigPath, port: 4201 });
+    expect(spawnCalls).toHaveLength(2);
+  });
+
+  test('missing config file (stat fails) still allows fallback handling', async () => {
+    const { rmSync } = await import('node:fs');
+    rmSync(tmpConfigPath);
+    // stat returns sentinel; proxy spawns once using whatever the user passed.
+    const h = await getOrStartProxy({ configPath: tmpConfigPath, port: 4202 });
+    expect(h.baseUrl).toContain('4202');
+    expect(spawnCalls).toHaveLength(1);
+  });
+});
