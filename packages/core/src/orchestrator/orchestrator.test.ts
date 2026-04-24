@@ -106,7 +106,7 @@ const mockLoadConfig = mock(() =>
   Promise.resolve({
     botName: 'Archon',
     assistant: 'claude',
-    assistants: { claude: {}, codex: {} },
+    assistants: { claude: {} },
     streaming: { telegram: 'stream', discord: 'batch', slack: 'batch' },
     paths: { workspaces: '/tmp', worktrees: '/tmp' },
     concurrency: { maxConversations: 10 },
@@ -126,21 +126,31 @@ mock.module('../utils/worktree-sync', () => ({
   syncArchonToWorktree: mockSyncArchonToWorktree,
 }));
 
-// Orchestrator (isolation & dispatch) mocks
+// Orchestrator (isolation) mocks
 const mockValidateAndResolveIsolation = mock(() =>
   Promise.resolve({ status: 'existing', cwd: '/workspace/project', env: null })
 );
-const mockDispatchBackgroundWorkflow = mock(() => Promise.resolve());
 
 mock.module('./orchestrator', () => ({
   validateAndResolveIsolation: mockValidateAndResolveIsolation,
-  dispatchBackgroundWorkflow: mockDispatchBackgroundWorkflow,
   IsolationBlockedError: class IsolationBlockedError extends Error {
     constructor(message: string) {
       super(message);
       this.name = 'IsolationBlockedError';
     }
   },
+}));
+
+// Workflow DB mock — used by foreground resume detection
+mock.module('../db/workflows', () => ({
+  findResumableRunByParentConversation: mock(() => Promise.resolve(null)),
+  getPausedWorkflowRun: mock(() => Promise.resolve(null)),
+  updateWorkflowRun: mock(() => Promise.resolve()),
+  getWorkflowRun: mock(() => Promise.resolve(null)),
+}));
+
+mock.module('../db/workflow-events', () => ({
+  createWorkflowEvent: mock(() => Promise.resolve()),
 }));
 
 // Prompt builder mock
@@ -279,7 +289,6 @@ function clearAllMocks(): void {
   mockFindWorkflow.mockClear();
   mockSyncArchonToWorktree.mockClear();
   mockValidateAndResolveIsolation.mockClear();
-  mockDispatchBackgroundWorkflow.mockClear();
   mockBuildOrchestratorPrompt.mockClear();
   mockBuildProjectScopedPrompt.mockClear();
   mockLoadConfig.mockClear();
@@ -705,7 +714,6 @@ describe('orchestrator-agent handleMessage', () => {
         assistant: 'claude',
         assistants: {
           claude: { settingSources: ['project', 'user'] },
-          codex: {},
         },
         streaming: { telegram: 'stream', discord: 'batch', slack: 'batch' },
         paths: { workspaces: '/tmp', worktrees: '/tmp' },
@@ -728,43 +736,6 @@ describe('orchestrator-agent handleMessage', () => {
           assistantConfig: expect.objectContaining({ settingSources: ['project', 'user'] }),
         })
       );
-    });
-
-    test('passes codex assistantConfig for codex assistant', async () => {
-      const codexConversation: Conversation = {
-        ...mockConversation,
-        ai_assistant_type: 'codex',
-      };
-      mockGetOrCreateConversation.mockResolvedValueOnce(codexConversation);
-      mockLoadConfig.mockResolvedValueOnce({
-        botName: 'Archon',
-        assistant: 'codex',
-        assistants: {
-          claude: { settingSources: ['project', 'user'] },
-          codex: {},
-        },
-        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch' },
-        paths: { workspaces: '/tmp', worktrees: '/tmp' },
-        concurrency: { maxConversations: 10 },
-        commands: { autoLoad: true },
-        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
-      });
-
-      const codexClient = {
-        sendQuery: mock(async function* () {
-          yield { type: 'result', sessionId: 'codex-session' };
-        }),
-      };
-      mockGetAgentProvider.mockReturnValueOnce(codexClient);
-
-      await handleMessage(platform, 'chat-456', 'hello');
-
-      // Should pass codex assistantConfig, not claude's
-      const callArgs = codexClient.sendQuery.mock.calls[0];
-      const requestOptions = callArgs?.[3] as Record<string, unknown> | undefined;
-      expect(requestOptions).toBeDefined();
-      expect(requestOptions).not.toHaveProperty('settingSources');
-      expect(requestOptions?.assistantConfig).toBeDefined();
     });
   });
 

@@ -40,9 +40,6 @@ describe('config-loader', () => {
   const originalEnv: Record<string, string | undefined> = {};
   const envVars = [
     'DEFAULT_AI_ASSISTANT',
-    'TELEGRAM_STREAMING_MODE',
-    'DISCORD_STREAMING_MODE',
-    'SLACK_STREAMING_MODE',
     'MAX_CONCURRENT_CONVERSATIONS',
     'WORKSPACE_PATH',
     'WORKTREE_BASE',
@@ -88,16 +85,13 @@ describe('config-loader', () => {
 
     test('parses valid YAML config', async () => {
       mockReadConfigFile.mockResolvedValue(`
-defaultAssistant: codex
-streaming:
-  telegram: batch
+defaultAssistant: claude
 concurrency:
   maxConversations: 5
 `);
 
       const config = await loadGlobalConfig();
-      expect(config.defaultAssistant).toBe('codex');
-      expect(config.streaming?.telegram).toBe('batch');
+      expect(config.defaultAssistant).toBe('claude');
       expect(config.concurrency?.maxConversations).toBe(5);
     });
 
@@ -161,10 +155,10 @@ concurrency:
 
   describe('loadRepoConfig', () => {
     test('loads from .archon/config.yaml', async () => {
-      mockReadConfigFile.mockResolvedValue('assistant: codex');
+      mockReadConfigFile.mockResolvedValue('assistant: claude');
 
       const config = await loadRepoConfig('/test/repo');
-      expect(config.assistant).toBe('codex');
+      expect(config.assistant).toBe('claude');
     });
 
     test('returns empty object when no config found', async () => {
@@ -224,29 +218,9 @@ concurrency:
       const config = await loadConfig();
 
       expect(config.assistant).toBe('claude');
-      // Built-ins always present; community providers (like `pi`) are
-      // seeded dynamically from the registry — check the built-ins
-      // explicitly rather than asserting an exhaustive shape.
+      // Built-ins always present; check the registered built-in (claude) explicitly.
       expect(config.assistants.claude).toEqual({});
-      expect(config.assistants.codex).toEqual({});
-      expect(config.streaming.telegram).toBe('stream');
       expect(config.concurrency.maxConversations).toBe(10);
-    });
-
-    test('env vars override config files', async () => {
-      mockReadConfigFile.mockResolvedValue(`
-defaultAssistant: claude
-streaming:
-  telegram: stream
-`);
-
-      process.env.DEFAULT_AI_ASSISTANT = 'codex';
-      process.env.TELEGRAM_STREAMING_MODE = 'batch';
-
-      const config = await loadConfig();
-
-      expect(config.assistant).toBe('codex');
-      expect(config.streaming.telegram).toBe('batch');
     });
 
     test('throws on unknown DEFAULT_AI_ASSISTANT env var', async () => {
@@ -285,12 +259,12 @@ streaming:
       mockReadConfigFile.mockImplementation(async (path: string) => {
         // First check for repo-specific config path (contains /repo/.archon/)
         if (pathMatches(path, '/repo/.archon/config.yaml')) {
-          return 'assistant: codex';
+          return 'assistants:\n  claude:\n    model: opus\n';
         }
         // Then check for global config (just .archon/config.yaml but not under /repo/)
         if (pathMatches(path, '.archon/config.yaml') && !globalConfigRead) {
           globalConfigRead = true;
-          return 'defaultAssistant: claude';
+          return 'assistants:\n  claude:\n    model: sonnet\n';
         }
         const error = new Error('ENOENT') as NodeJS.ErrnoException;
         error.code = 'ENOENT';
@@ -298,7 +272,7 @@ streaming:
       });
 
       const config = await loadConfig('/test/repo');
-      expect(config.assistant).toBe('codex');
+      expect(config.assistants.claude.model).toBe('opus');
     });
 
     test('merges assistant defaults from global and repo config', async () => {
@@ -310,11 +284,11 @@ streaming:
       let globalConfigRead = false;
       mockReadConfigFile.mockImplementation(async (path: string) => {
         if (pathMatches(path, '/repo/.archon/config.yaml')) {
-          return `assistants:\n  codex:\n    webSearchMode: live\n    additionalDirectories:\n      - /repo\n`;
+          return `assistants:\n  claude:\n    model: opus\n`;
         }
         if (pathMatches(path, '.archon/config.yaml') && !globalConfigRead) {
           globalConfigRead = true;
-          return `assistants:\n  claude:\n    model: sonnet\n  codex:\n    model: gpt-5.2-codex\n    modelReasoningEffort: medium\n`;
+          return `assistants:\n  claude:\n    model: sonnet\n`;
         }
         const error = new Error('ENOENT') as NodeJS.ErrnoException;
         error.code = 'ENOENT';
@@ -322,11 +296,8 @@ streaming:
       });
 
       const config = await loadConfig('/test/repo');
-      expect(config.assistants.claude.model).toBe('sonnet');
-      expect(config.assistants.codex.model).toBe('gpt-5.2-codex');
-      expect(config.assistants.codex.modelReasoningEffort).toBe('medium');
-      expect(config.assistants.codex.webSearchMode).toBe('live');
-      expect(config.assistants.codex.additionalDirectories).toEqual(['/repo']);
+      // Repo overrides global
+      expect(config.assistants.claude.model).toBe('opus');
     });
 
     test('propagates baseBranch from repo worktree config', async () => {
@@ -554,12 +525,11 @@ assistants:
 
     test('preserves existing non-updated fields', async () => {
       mockReadConfigFile.mockResolvedValue(`
-defaultAssistant: codex
+defaultAssistant: claude
 botName: MyBot
 assistants:
-  codex:
-    model: gpt-5.3-codex
-    modelReasoningEffort: medium
+  claude:
+    model: sonnet
 `);
 
       await updateGlobalConfig({
@@ -578,12 +548,12 @@ assistants:
       mockReadConfigFile.mockRejectedValue(error);
 
       await updateGlobalConfig({
-        defaultAssistant: 'codex',
+        defaultAssistant: 'claude',
       });
 
       expect(mockWriteConfigFile).toHaveBeenCalled();
       const writtenContent = mockWriteConfigFile.mock.calls[0]?.[1] as string;
-      expect(writtenContent).toContain('codex');
+      expect(writtenContent).toContain('claude');
     });
 
     test('throws on permission errors', async () => {
@@ -592,7 +562,7 @@ assistants:
       permError.code = 'EACCES';
       mockWriteConfigFile.mockRejectedValue(permError);
 
-      await expect(updateGlobalConfig({ defaultAssistant: 'codex' })).rejects.toThrow(
+      await expect(updateGlobalConfig({ defaultAssistant: 'claude' })).rejects.toThrow(
         'Permission denied'
       );
     });
@@ -613,31 +583,16 @@ assistants:
       expect(safe).not.toHaveProperty('commands');
     });
 
-    test('strips additionalDirectories from assistants.codex', async () => {
-      mockReadConfigFile.mockResolvedValue(`
-assistants:
-  codex:
-    additionalDirectories:
-      - /sensitive/path
-`);
-      const config = await loadConfig();
-      const safe = toSafeConfig(config);
-      expect(safe.assistants.codex).not.toHaveProperty('additionalDirectories');
-    });
-
     test('preserves non-sensitive fields', async () => {
-      mockReadConfigFile.mockResolvedValue('defaultAssistant: codex');
+      mockReadConfigFile.mockResolvedValue('defaultAssistant: claude');
       const config = await loadConfig();
       const safe = toSafeConfig(config);
       expect(typeof safe.botName).toBe('string');
-      expect(safe.assistant).toBe('codex');
-      expect(safe.streaming).toBeDefined();
+      expect(safe.assistant).toBe('claude');
       expect(safe.concurrency).toBeDefined();
       expect(safe.defaults).toBeDefined();
       expect(safe.assistants).toBeDefined();
       expect(safe.assistants.claude).toBeDefined();
-      expect(safe.assistants.codex).toBeDefined();
-      expect(safe.assistants.codex).not.toHaveProperty('additionalDirectories');
     });
   });
 });

@@ -242,56 +242,6 @@ nodes:
       expect(workflows).toHaveLength(1);
       expect(workflows[0].provider).toBe('invalid');
     });
-
-    it('should reject claude model with codex provider at load time', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const invalidYaml = `name: invalid-model
-description: Invalid model/provider pairing
-provider: codex
-model: sonnet
-nodes:
-  - id: test
-    command: test
-`;
-      await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-
-      expect(result.workflows).toHaveLength(0);
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].errorType).toBe('validation_error');
-      expect(result.errors[0].error).toContain('not compatible');
-    });
-
-    it('should parse codex options fields', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const yaml = `name: codex-options
-description: Codex options are parsed
-provider: codex
-model: gpt-5.2-codex
-modelReasoningEffort: medium
-webSearchMode: live
-additionalDirectories:
-  - /repo/a
-  - 123
-nodes:
-  - id: test
-    command: test
-`;
-      await writeFile(join(workflowDir, 'options.yaml'), yaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows.map(ws => ws.workflow);
-
-      expect(workflows).toHaveLength(1);
-      expect(workflows[0].modelReasoningEffort).toBe('medium');
-      expect(workflows[0].webSearchMode).toBe('live');
-      expect(workflows[0].additionalDirectories).toEqual(['/repo/a']);
-    });
   });
 
   describe('discoverWorkflows', () => {
@@ -489,8 +439,8 @@ nodes:
 
       const fullWorkflow = `name: full-workflow
 description: A workflow with all fields
-provider: codex
-model: gpt-4
+provider: claude
+model: sonnet
 nodes:
   - id: step-one
     command: step-one
@@ -504,8 +454,8 @@ nodes:
       const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(1);
-      expect(workflows[0].provider).toBe('codex');
-      expect(workflows[0].model).toBe('gpt-4');
+      expect(workflows[0].provider).toBe('claude');
+      expect(workflows[0].model).toBe('sonnet');
     });
 
     it('should handle empty workflow directory', async () => {

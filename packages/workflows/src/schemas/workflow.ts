@@ -11,18 +11,6 @@ import {
 } from './dag-node';
 
 // ---------------------------------------------------------------------------
-// Shared enum schemas
-// ---------------------------------------------------------------------------
-
-export const modelReasoningEffortSchema = z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']);
-
-export type ModelReasoningEffort = z.infer<typeof modelReasoningEffortSchema>;
-
-export const webSearchModeSchema = z.enum(['disabled', 'cached', 'live']);
-
-export type WebSearchMode = z.infer<typeof webSearchModeSchema>;
-
-// ---------------------------------------------------------------------------
 // Workflow-level worktree policy
 // ---------------------------------------------------------------------------
 
@@ -58,8 +46,6 @@ export const workflowBaseSchema = z.object({
   description: z.string().min(1),
   provider: z.string().trim().min(1).optional(),
   model: z.string().optional(),
-  modelReasoningEffort: modelReasoningEffortSchema.optional(),
-  webSearchMode: webSearchModeSchema.optional(),
   additionalDirectories: z.array(z.string()).optional(),
   interactive: z.boolean().optional(),
   effort: effortLevelSchema.optional(),

@@ -15,48 +15,43 @@
 // Imported and re-exported here so existing consumers don't break.
 import type {
   ClaudeProviderDefaults,
-  CodexProviderDefaults,
-  PiProviderDefaults,
+  OpenCodeProviderDefaults,
+  PydanticProviderDefaults,
+  LiteLLMProviderDefaults,
   ProviderDefaultsMap,
 } from '@archon/providers/types';
 
 export type {
   ClaudeProviderDefaults,
-  CodexProviderDefaults,
-  PiProviderDefaults,
+  OpenCodeProviderDefaults,
+  PydanticProviderDefaults,
+  LiteLLMProviderDefaults,
   ProviderDefaultsMap,
 };
 
 /**
  * Intersection type: generic `ProviderDefaultsMap` (any string key) with
- * typed built-in entries.
- *
- * The built-in entries exist ONLY to give call sites like
- * `config.assistants.claude.model` IDE autocomplete without `as` casts.
- * They do NOT provide parser safety (each provider's `parseXxxConfig`
- * already takes `Record<string, unknown>` and defends itself).
- *
- * Community providers should NOT be added here — they live behind the
- * generic `[string]` index. Adding a new community provider must not
- * require a core-package type change; that's the whole point of Phase 2.
+ * typed built-in entries. Built-ins: claude, opencode, pydantic.
  */
 export type AssistantDefaultsConfig = ProviderDefaultsMap & {
   claude?: ClaudeProviderDefaults;
-  codex?: CodexProviderDefaults;
+  opencode?: OpenCodeProviderDefaults;
+  pydantic?: PydanticProviderDefaults;
+  litellm?: LiteLLMProviderDefaults;
 };
 
 /**
  * Required variant — built-ins are always present after `loadConfig`.
  *
- * `getDefaults()` seeds every registered provider (built-in + community)
- * with `{}`, so community providers appear in the map too — just typed as
- * `ProviderDefaults` via the generic index rather than a specific shape.
+ * `getDefaults()` seeds every registered provider with `{}`.
  * `registerBuiltinProviders()` is called before `loadConfig()` at every
- * process entrypoint, so claude/codex are guaranteed present.
+ * process entrypoint, so all built-ins are guaranteed present.
  */
 export type AssistantDefaults = ProviderDefaultsMap & {
   claude: ClaudeProviderDefaults;
-  codex: CodexProviderDefaults;
+  opencode: OpenCodeProviderDefaults;
+  pydantic: PydanticProviderDefaults;
+  litellm: LiteLLMProviderDefaults;
 };
 
 export interface GlobalConfig {
@@ -76,15 +71,6 @@ export interface GlobalConfig {
    * Assistant-specific defaults (model, reasoning effort, etc.)
    */
   assistants?: AssistantDefaultsConfig;
-
-  /**
-   * Platform streaming preferences (can be overridden per conversation)
-   */
-  streaming?: {
-    telegram?: 'stream' | 'batch';
-    discord?: 'stream' | 'batch';
-    slack?: 'stream' | 'batch';
-  };
 
   /**
    * Directory preferences (usually not needed - defaults work well)
@@ -112,6 +98,29 @@ export interface GlobalConfig {
      * @default 10
      */
     maxConversations?: number;
+  };
+
+  /**
+   * Sentry error-reporting settings. Off by default. Enables stack-trace
+   * reporting for uncaught exceptions, unhandled rejections, and
+   * logger.fatal(...) events. Not a log stream — ordinary logger.error(...)
+   * is not forwarded.
+   *
+   * DSN resolution order (first match wins):
+   *   1. ARCHON_DISABLE_SENTRY=1 forces off.
+   *   2. ARCHON_SENTRY_DSN / SENTRY_DSN env var.
+   *   3. this `dsn` field.
+   */
+  sentry?: {
+    /**
+     * Sentry project DSN. Leave unset to keep Sentry disabled.
+     */
+    dsn?: string;
+    /**
+     * Environment tag attached to events (e.g. 'production', 'staging').
+     * @default 'production'
+     */
+    environment?: string;
   };
 }
 
@@ -255,11 +264,6 @@ export interface MergedConfig {
   botName: string;
   assistant: string;
   assistants: AssistantDefaults;
-  streaming: {
-    telegram: 'stream' | 'batch';
-    discord: 'stream' | 'batch';
-    slack: 'stream' | 'batch';
-  };
   paths: {
     workspaces: string;
     worktrees: string;
@@ -308,11 +312,6 @@ export interface SafeConfig {
   botName: string;
   assistant: string;
   assistants: ProviderDefaultsMap;
-  streaming: {
-    telegram: 'stream' | 'batch';
-    discord: 'stream' | 'batch';
-    slack: 'stream' | 'batch';
-  };
   concurrency: {
     maxConversations: number;
   };

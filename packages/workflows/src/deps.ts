@@ -8,7 +8,6 @@
  * No more mirror copies — single source of truth for IAgentProvider, MessageChunk, etc.
  */
 import type { IWorkflowStore } from './store';
-import type { ModelReasoningEffort, WebSearchMode } from './schemas';
 import type {
   IAgentProvider,
   MessageChunk,
@@ -18,6 +17,7 @@ import type {
   ProviderDefaultsMap,
   ProviderCapabilities,
 } from '@archon/providers/types';
+import type { ResolvedSkill, ResolvedAgent, ModelsFile } from './schemas';
 
 // Re-export provider types so existing workflow engine consumers don't break
 export type {
@@ -80,20 +80,31 @@ export interface WorkflowConfig {
     loadDefaultWorkflows?: boolean;
     loadDefaultCommands?: boolean;
   };
-  // Intersection: generic map for community providers + typed built-in entries.
-  // Built-ins are typed so executor/dag-executor get type-safe config access for
-  // Claude settingSources, Codex reasoningEffort, etc. without casts.
-  // Community providers use the generic [string] index signature.
+  // Intersection: generic map for third-party providers + typed built-in entries.
   assistants: ProviderDefaultsMap & {
     claude: {
       model?: string;
       settingSources?: ('project' | 'user')[];
     };
-    codex: {
+    opencode: {
       model?: string;
-      modelReasoningEffort?: ModelReasoningEffort;
-      webSearchMode?: WebSearchMode;
-      additionalDirectories?: string[];
+      opencodeBinaryPath?: string;
+      baseUrl?: string;
+      providers?: Record<string, { authTokenEnv?: string }>;
+    };
+    pydantic: {
+      uvBinaryPath?: string;
+      agentsDir?: string;
+      agents?: Record<string, { entry: string; deps?: string[] }>;
+    };
+    litellm: {
+      model?: string;
+      litellmBinaryPath?: string;
+      baseUrl?: string;
+      configPath?: string;
+      port?: number;
+      masterKeyEnv?: string;
+      providers?: Record<string, { authTokenEnv?: string; apiBaseEnv?: string }>;
     };
   };
 }
@@ -105,6 +116,34 @@ export interface WorkflowConfig {
 export type AgentProviderFactory = (provider: string) => IAgentProvider;
 
 // ---------------------------------------------------------------------------
+// Skill + agent content registry (runtime-agnostic content surface)
+// ---------------------------------------------------------------------------
+
+/**
+ * Loaded skill/agent content the executor passes to any runtime. `model` is the
+ * frontmatter hint only — the real winning model is computed by the resolver
+ * using this value as one of eight tiers.
+ */
+export interface SkillAgentSummary {
+  name: string;
+  source: 'project' | 'global' | 'bundled';
+}
+
+/**
+ * Content registry abstracting over the three source tiers (bundled, global,
+ * project). Populated by @archon/core's config loader once loaders are wired
+ * up, and injected into the workflow engine via `WorkflowDeps`.
+ */
+export interface SkillAgentRegistry {
+  loadSkill(name: string): Promise<ResolvedSkill>;
+  listSkills(): Promise<SkillAgentSummary[]>;
+  loadAgent(name: string): Promise<ResolvedAgent>;
+  listAgents(): Promise<SkillAgentSummary[]>;
+  /** Merged models.yaml stacks — bundled/global/project — for the resolver. */
+  modelsFiles(): { bundled?: ModelsFile; global?: ModelsFile; project?: ModelsFile };
+}
+
+// ---------------------------------------------------------------------------
 // WorkflowDeps — the single injection point
 // ---------------------------------------------------------------------------
 
@@ -112,4 +151,11 @@ export interface WorkflowDeps {
   store: IWorkflowStore;
   getAgentProvider: AgentProviderFactory;
   loadConfig: (cwd: string) => Promise<WorkflowConfig>;
+  /**
+   * Optional content registry. Undefined during the transition (Increment 1b
+   * lands the interface, later increments populate it). When present, the
+   * executor uses it to resolve `skills:` and `agents:` references on any
+   * runtime — not just Claude SDK.
+   */
+  skillAgentRegistry?: SkillAgentRegistry;
 }

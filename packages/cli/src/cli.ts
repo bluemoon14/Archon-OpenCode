@@ -31,12 +31,9 @@ if (!process.env.CLAUDE_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
   }
 }
 
-// DATABASE_URL is no longer required - SQLite will be used as default
-
 // Bootstrap provider registry before any provider lookups
-import { registerBuiltinProviders, registerCommunityProviders } from '@archon/providers';
+import { registerBuiltinProviders } from '@archon/providers';
 registerBuiltinProviders();
-registerCommunityProviders();
 
 // Import commands after dotenv is loaded
 import { versionCommand } from './commands/version';
@@ -63,17 +60,26 @@ import { continueCommand } from './commands/continue';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
 import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
-import { serveCommand } from './commands/serve';
-import { closeDatabase } from '@archon/core';
+import { skillsListCommand, skillsShowCommand } from './commands/skills';
+import { agentsListCommand, agentsShowCommand } from './commands/agents';
+import {
+  modelsListCommand,
+  modelsSetCommand,
+  modelsResetCommand,
+  modelsValidateCommand,
+} from './commands/models';
+import { mcpServeCommand } from './commands/mcp';
+import { closeDatabase, loadGlobalConfig } from '@archon/core';
 import {
   setLogLevel,
+  setErrorReporter,
   createLogger,
   checkForUpdate,
   BUNDLED_IS_BINARY,
   BUNDLED_VERSION,
-  shutdownTelemetry,
 } from '@archon/paths';
 import * as git from '@archon/git';
+import { initSentry, captureException, flushSentry } from './sentry/init';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -103,9 +109,17 @@ Commands:
   isolation cleanup --merged Remove environments with branches merged into main
   continue <branch> [msg]    Continue work on an existing worktree with prior context
   complete <branch> [...]    Complete branch lifecycle (remove worktree + branches)
-  serve                      Start the web UI server (downloads web UI on first run)
   validate workflows [name]  Validate workflow definitions and their references
   validate commands [name]   Validate command files
+  skills list                List every skill (bundled + global + project)
+  skills show <name>         Show a skill's SKILL.md body + resolved model
+  agents list                List every agent (bundled + global + project)
+  agents show <name>         Show an agent's body + resolved model
+  models list                Show the full skill/agent model-assignment table
+  models set <kind> <name> <model>  Write a model assignment (kind: skill|agent|default|alias)
+  models reset <kind> <name> Remove a project/global override
+  models validate            Validate every models.yaml and check model routability
+  mcp serve                  Start the stdio MCP server (exposes skills/agents/models to Claude Code etc.)
   version                    Show version info
   help                       Show this help message
 
@@ -121,8 +135,6 @@ Options:
   --json                     Output machine-readable JSON (for workflow list)
   --workflow <name>          Workflow to run for 'continue' (default: archon-assist)
   --no-context               Skip context injection for 'continue'
-  --port <port>              Override server port for 'serve' (default: 3090)
-  --download-only            Download web UI without starting the server
 
 Examples:
   archon chat "What does the orchestrator do?"
@@ -148,6 +160,56 @@ async function closeDb(): Promise<void> {
   }
 }
 
+/**
+ * Initialize Sentry (if configured) and wire:
+ *   1. process-level uncaughtException / unhandledRejection handlers,
+ *   2. the logger.fatal hook in @archon/paths.
+ *
+ * Called once before the main command dispatch. All steps are safe to skip
+ * when Sentry is disabled.
+ */
+let sentryHandlersInstalled = false;
+async function setupSentry(): Promise<void> {
+  if (sentryHandlersInstalled) return;
+  sentryHandlersInstalled = true;
+
+  const globalConfig = await loadGlobalConfig().catch(() => ({}));
+  const sentryConfig = (globalConfig as { sentry?: { dsn?: string; environment?: string } }).sentry;
+  const enabled = await initSentry({
+    dsn: sentryConfig?.dsn,
+    environment: sentryConfig?.environment,
+  });
+  if (!enabled) return;
+
+  setErrorReporter((err, ctx) => {
+    captureException(err, ctx);
+  });
+
+  let terminating = false;
+  const terminalCapture = (
+    err: unknown,
+    kind: 'uncaughtException' | 'unhandledRejection'
+  ): void => {
+    if (terminating) return;
+    terminating = true;
+    captureException(err, { kind });
+    // Make the error visible on stderr even when the handler is called — the
+    // default Node behavior is to print + exit, but registering this listener
+    // suppresses both. Surface it ourselves before flushing.
+    const e = err as Error;
+    console.error(`Fatal (${kind}):`, e?.stack ?? e?.message ?? err);
+    void flushSentry().finally(() => {
+      process.exit(1);
+    });
+  };
+  process.on('uncaughtException', (err: Error) => {
+    terminalCapture(err, 'uncaughtException');
+  });
+  process.on('unhandledRejection', (reason: unknown) => {
+    terminalCapture(reason, 'unhandledRejection');
+  });
+}
+
 async function printUpdateNotice(quiet: boolean | undefined): Promise<void> {
   if (quiet || !BUNDLED_IS_BINARY) return;
   try {
@@ -167,6 +229,11 @@ async function printUpdateNotice(quiet: boolean | undefined): Promise<void> {
  * Returns exit code (0 = success, non-zero = failure)
  */
 async function main(): Promise<number> {
+  // Wire Sentry (and process-level error handlers) before argument parsing
+  // so crashes in parseArgs / option handling are still reported. Safe no-op
+  // when no DSN is configured.
+  await setupSentry();
+
   const args = process.argv.slice(2);
 
   // Handle no arguments - show help and exit successfully
@@ -200,8 +267,6 @@ async function main(): Promise<number> {
         reason: { type: 'string' },
         workflow: { type: 'string' },
         'no-context': { type: 'boolean' },
-        port: { type: 'string' },
-        'download-only': { type: 'boolean' },
         scope: { type: 'string' },
         force: { type: 'boolean' },
       },
@@ -236,7 +301,7 @@ async function main(): Promise<number> {
   const subcommand = positionals[1];
 
   // Commands that don't require git repo validation
-  const noGitCommands = ['version', 'help', 'setup', 'chat', 'continue', 'serve'];
+  const noGitCommands = ['version', 'help', 'setup', 'chat', 'continue'];
   const requiresGitRepo = !noGitCommands.includes(command ?? '');
 
   try {
@@ -547,6 +612,104 @@ async function main(): Promise<number> {
         break;
       }
 
+      case 'skills':
+        switch (subcommand) {
+          case 'list':
+            return await skillsListCommand({ cwd: effectiveCwd, json: jsonFlag });
+          case 'show': {
+            const name = positionals[2];
+            if (name === undefined || name.length === 0) {
+              console.error('Usage: archon skills show <name>');
+              return 1;
+            }
+            return await skillsShowCommand({ cwd: effectiveCwd, name, json: jsonFlag });
+          }
+          default:
+            if (subcommand === undefined) console.error('Missing skills subcommand');
+            else console.error(`Unknown skills subcommand: ${subcommand}`);
+            console.error('Available: list, show');
+            return 1;
+        }
+
+      case 'agents':
+        switch (subcommand) {
+          case 'list':
+            return await agentsListCommand({ cwd: effectiveCwd, json: jsonFlag });
+          case 'show': {
+            const name = positionals[2];
+            if (name === undefined || name.length === 0) {
+              console.error('Usage: archon agents show <name>');
+              return 1;
+            }
+            return await agentsShowCommand({ cwd: effectiveCwd, name, json: jsonFlag });
+          }
+          default:
+            if (subcommand === undefined) console.error('Missing agents subcommand');
+            else console.error(`Unknown agents subcommand: ${subcommand}`);
+            console.error('Available: list, show');
+            return 1;
+        }
+
+      case 'mcp':
+        switch (subcommand) {
+          case 'serve':
+            return await mcpServeCommand({ cwd: effectiveCwd });
+          default:
+            if (subcommand === undefined) console.error('Missing mcp subcommand');
+            else console.error(`Unknown mcp subcommand: ${subcommand}`);
+            console.error('Available: serve');
+            return 1;
+        }
+
+      case 'models':
+        switch (subcommand) {
+          case 'list':
+            return await modelsListCommand({ cwd: effectiveCwd, json: jsonFlag });
+          case 'set': {
+            const kind = positionals[2];
+            const name = positionals[3];
+            const model = positionals[4];
+            const globalFlag = args.includes('--global') || positionals.includes('--global');
+            if (kind === undefined || name === undefined || model === undefined) {
+              console.error(
+                'Usage: archon models set <skill|agent|default|alias> <name> <model> [--global]'
+              );
+              return 1;
+            }
+            return await modelsSetCommand({
+              cwd: effectiveCwd,
+              kind,
+              name,
+              model,
+              global: globalFlag,
+            });
+          }
+          case 'reset': {
+            const kind = positionals[2];
+            const name = positionals[3];
+            const globalFlag = args.includes('--global') || positionals.includes('--global');
+            if (kind === undefined || name === undefined) {
+              console.error(
+                'Usage: archon models reset <skill|agent|default|alias> <name> [--global]'
+              );
+              return 1;
+            }
+            return await modelsResetCommand({
+              cwd: effectiveCwd,
+              kind,
+              name,
+              global: globalFlag,
+            });
+          }
+          case 'validate':
+            return await modelsValidateCommand({ cwd: effectiveCwd, json: jsonFlag });
+          default:
+            if (subcommand === undefined) console.error('Missing models subcommand');
+            else console.error(`Unknown models subcommand: ${subcommand}`);
+            console.error('Available: list, set, reset, validate');
+            return 1;
+        }
+
       case 'continue': {
         const continueBranch = positionals[1];
         if (!continueBranch) {
@@ -561,12 +724,6 @@ async function main(): Promise<number> {
           noContext: noContextFlag,
         });
         break;
-      }
-
-      case 'serve': {
-        const servePort = values.port !== undefined ? Number(values.port) : undefined;
-        const downloadOnly = Boolean(values['download-only']);
-        return await serveCommand({ port: servePort, downloadOnly });
       }
 
       default:
@@ -588,11 +745,11 @@ async function main(): Promise<number> {
     }
     return 1;
   } finally {
-    // Flush queued telemetry events before the CLI process exits.
-    // Short-lived CLI commands lose buffered events if shutdown() is skipped.
-    await shutdownTelemetry();
     // Always close database connection
     await closeDb();
+    // Flush any queued Sentry events before the process exits. No-op when
+    // Sentry is disabled; bounded by the flush timeout so it never hangs.
+    await flushSentry();
   }
 }
 
@@ -603,6 +760,9 @@ main()
   })
   .catch((error: unknown) => {
     const err = error as Error;
+    captureException(err, { kind: 'mainCatch' });
     console.error('Fatal error:', err.message);
-    process.exit(1);
+    void flushSentry().finally(() => {
+      process.exit(1);
+    });
   });

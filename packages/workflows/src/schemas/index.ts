@@ -12,6 +12,23 @@
 export { stepRetryConfigSchema } from './retry';
 export type { StepRetryConfig } from './retry';
 
+// Model-assignment manifest (models.yaml)
+export {
+  modelsFileSchema,
+  modelsFileDefaultsSchema,
+  INHERIT_MODEL,
+  isInheritModel,
+} from './models';
+export type { ModelsFile, ModelsFileDefaults, InheritModel } from './models';
+
+// Skills (SKILL.md frontmatter + resolved body)
+export { skillFrontmatterSchema } from './skills';
+export type { SkillFrontmatter, ResolvedSkill } from './skills';
+
+// Agents (<name>.md frontmatter + resolved body)
+export { agentFrontmatterSchema } from './agents';
+export type { AgentFrontmatter, ResolvedAgent } from './agents';
+
 // Loop node configuration
 export { loopNodeConfigSchema } from './loop';
 export type { LoopNodeConfig } from './loop';
@@ -72,18 +89,8 @@ export type {
 } from './dag-node';
 
 // Workflow definition
-export {
-  modelReasoningEffortSchema,
-  webSearchModeSchema,
-  workflowBaseSchema,
-  workflowDefinitionSchema,
-} from './workflow';
-export type {
-  ModelReasoningEffort,
-  WebSearchMode,
-  WorkflowBase,
-  WorkflowDefinition,
-} from './workflow';
+export { workflowBaseSchema, workflowDefinitionSchema } from './workflow';
+export type { WorkflowBase, WorkflowDefinition } from './workflow';
 
 // Workflow run state
 export {

@@ -2,7 +2,7 @@
  * @archon/core - Shared business logic for Archon
  *
  * This package contains:
- * - AI client adapters (Claude, Codex)
+ * - AI client adapters (Claude)
  * - Database operations (SQLite/PostgreSQL)
  * - Orchestration logic
  * - Workflow store adapter (bridges core DB to @archon/workflows IWorkflowStore)
@@ -21,8 +21,6 @@ export {
   type Session,
   type CommandResult,
   type IPlatformAdapter,
-  type IWebPlatformAdapter,
-  isWebAdapter,
   type MessageMetadata,
 } from './types';
 

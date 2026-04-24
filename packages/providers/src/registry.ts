@@ -1,11 +1,12 @@
 /**
  * Provider Registry
  *
- * Typed registry where each entry is a ProviderRegistration record (factory + metadata).
- * Replaces the hardcoded factory switch from Phase 1.
+ * Built-ins: Claude (Anthropic), OpenCode (spawned `opencode serve`), and
+ * Pydantic AI (BYO Python agent over a JSONL stdio bridge). Third-party
+ * providers register via `registerProvider()` before any lookups.
  *
- * Bootstrap: callers must call registerBuiltinProviders() at process entrypoints
- * (server startup, CLI init) before any provider lookups.
+ * Bootstrap: callers must call registerBuiltinProviders() at process
+ * entrypoints (CLI init) before any provider lookups.
  */
 import type {
   IAgentProvider,
@@ -14,10 +15,14 @@ import type {
   ProviderInfo,
 } from './types';
 import { ClaudeProvider } from './claude/provider';
-import { CodexProvider } from './codex/provider';
 import { CLAUDE_CAPABILITIES } from './claude/capabilities';
-import { CODEX_CAPABILITIES } from './codex/capabilities';
-import { registerPiProvider } from './community/pi/registration';
+import { OpenCodeProvider } from './opencode/provider';
+import { OPENCODE_CAPABILITIES } from './opencode/capabilities';
+import { PydanticProvider } from './pydantic/provider';
+import { PYDANTIC_CAPABILITIES } from './pydantic/capabilities';
+import { LiteLLMProvider } from './litellm/provider';
+import { LITELLM_CAPABILITIES } from './litellm/capabilities';
+import { isLiteLLMModel } from './litellm/config';
 import { UnknownProviderError } from './errors';
 import { createLogger } from '@archon/paths';
 
@@ -102,7 +107,7 @@ export function isRegisteredProvider(id: string): boolean {
 }
 
 /**
- * Register built-in providers (Claude, Codex). Idempotent — skips already-registered IDs.
+ * Register built-in providers. Idempotent — skips already-registered IDs.
  * Must be called at process entrypoints (server, CLI) before any provider lookups.
  */
 export function registerBuiltinProviders(): void {
@@ -119,16 +124,51 @@ export function registerBuiltinProviders(): void {
       builtIn: true,
     },
     {
-      id: 'codex',
-      displayName: 'Codex (OpenAI)',
-      factory: () => new CodexProvider(),
-      capabilities: CODEX_CAPABILITIES,
+      id: 'litellm',
+      displayName: 'LiteLLM (proxy)',
+      factory: () => new LiteLLMProvider(),
+      capabilities: LITELLM_CAPABILITIES,
+      // Claim the canonical LiteLLM upstream prefixes: anthropic/, openai/,
+      // azure/, azure_ai/, novita/. See ./litellm/config.ts for the full list.
+      //
+      // `anthropic/*` routing: both Claude and LiteLLM accept these prefixes.
+      // inferProviderFromModel() returns the FIRST built-in match and Claude
+      // is registered first — so Claude SDK wins by default (which matches the
+      // "prefer Claude SDK when the binary is installed" guidance). Users who
+      // want to force LiteLLM routing set `provider: litellm` on the workflow
+      // node, overriding the inference.
+      isModelCompatible: (model: string): boolean => isLiteLLMModel(model),
+      builtIn: true,
+    },
+    {
+      id: 'opencode',
+      displayName: 'OpenCode',
+      factory: () => new OpenCodeProvider(),
+      capabilities: OPENCODE_CAPABILITIES,
       isModelCompatible: (model: string): boolean => {
-        const claudeAliases = ['sonnet', 'opus', 'haiku'];
-        return (
-          !claudeAliases.includes(model) && !model.startsWith('claude-') && model !== 'inherit'
-        );
+        // Explicit opencode/ prefix is the inference hint. Anthropic-native
+        // aliases (sonnet/opus/haiku) and bare claude-* stay reserved so the
+        // Claude provider wins by default. LiteLLM's prefixes (anthropic/,
+        // openai/, azure/, azure_ai/, novita/) are also reserved so LiteLLM
+        // claims them. Otherwise we accept any `providerID/modelID` shape
+        // (OpenCode fronts many upstreams).
+        if (!model) return false;
+        if (model.startsWith('opencode/')) return true;
+        if (['sonnet', 'opus', 'haiku'].includes(model)) return false;
+        if (model.startsWith('claude-') || model === 'inherit') return false;
+        if (isLiteLLMModel(model)) return false;
+        return /^[a-z][a-z0-9_-]*\/.+/i.test(model);
       },
+      builtIn: true,
+    },
+    {
+      id: 'pydantic',
+      displayName: 'Pydantic AI (BYO)',
+      factory: () => new PydanticProvider(),
+      capabilities: PYDANTIC_CAPABILITIES,
+      // Selection must be explicit via `provider: pydantic` + `agent: <name>`.
+      // No model-name routing — Pydantic agents pick their own upstream.
+      isModelCompatible: (): boolean => false,
       builtIn: true,
     },
   ];
@@ -139,30 +179,6 @@ export function registerBuiltinProviders(): void {
       getLog().debug({ provider: entry.id }, 'builtin_provider.registered');
     }
   }
-}
-
-/**
- * Register all bundled community providers in one call.
- *
- * Process entrypoints (server, CLI, config-loader) call this once after
- * `registerBuiltinProviders()`. Adding a new community provider means:
- *   1. Drop the implementation under `packages/providers/src/community/<id>/`.
- *   2. Export a `register<Name>Provider()` function from it.
- *   3. Import + call it here.
- *
- * That's the entire cross-cutting change outside the provider's own
- * directory. No entrypoint edits, no config-type edits — just add a line
- * to this function. That's the Phase 2 contract (#1195): community
- * providers are a localized addition.
- *
- * Each `register*Provider` is itself idempotent, so calling this
- * aggregator multiple times (e.g. from both CLI and config-loader paths)
- * is safe. Errors during registration are not caught here — a broken
- * community provider should fail loud at bootstrap, not silently
- * disappear.
- */
-export function registerCommunityProviders(): void {
-  registerPiProvider();
 }
 
 /** @internal Test-only — clears the registry. Not for production use. */

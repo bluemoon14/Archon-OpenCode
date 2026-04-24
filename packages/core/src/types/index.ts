@@ -5,7 +5,6 @@ import type { TransitionTrigger } from '../state/session-transitions';
 import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 import { z } from 'zod';
 
-// MessageChunk imported for use in IPlatformAdapter/IWebPlatformAdapter below
 import type { MessageChunk } from '@archon/providers/types';
 
 /**
@@ -99,10 +98,6 @@ export interface CommandResult {
   };
 }
 
-/**
- * Generic platform adapter interface
- * Allows supporting multiple platforms (Telegram, Slack, GitHub, etc.)
- */
 export interface MessageMetadata {
   category?:
     | 'tool_call_formatted'
@@ -137,7 +132,7 @@ export interface IPlatformAdapter {
   getStreamingMode(): 'stream' | 'batch';
 
   /**
-   * Get the platform type identifier (e.g., 'telegram', 'github', 'slack')
+   * Get the platform type identifier.
    */
   getPlatformType(): string;
 
@@ -151,41 +146,14 @@ export interface IPlatformAdapter {
    */
   stop(): void;
 
-  /**
-   * Optional: Send a structured event (MessageChunk) to the platform.
-   * Only implemented by adapters that can display rich structured data (e.g., Web UI).
-   * Other adapters (Telegram, Slack) continue using sendMessage() for formatted text.
-   */
+  /** Optional structured event channel (unused after web UI removal; kept for compatibility). */
   sendStructuredEvent?(conversationId: string, event: MessageChunk): Promise<void>;
 
   /** Retract previously streamed text (used when workflow routing intercepts) */
   emitRetract?(conversationId: string): Promise<void>;
 }
 
-/**
- * Extended platform adapter for the Web UI.
- * Adds methods for SSE event bridging, message persistence, and lock events
- * that are only meaningful in the web context.
- */
-export interface IWebPlatformAdapter extends IPlatformAdapter {
-  sendStructuredEvent(conversationId: string, event: MessageChunk): Promise<void>;
-  setConversationDbId(platformConversationId: string, dbId: string): void;
-  setupEventBridge(workerConversationId: string, parentConversationId: string): () => void;
-  emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): Promise<void>;
-  registerOutputCallback(conversationId: string, callback: (text: string) => void): void;
-  removeOutputCallback(conversationId: string): void;
-}
-
-/**
- * Type guard for web platform adapter.
- */
-export function isWebAdapter(adapter: IPlatformAdapter): adapter is IWebPlatformAdapter {
-  return adapter.getPlatformType() === 'web';
-}
-
 // Re-export workflow schema types for config-types.ts compatibility
-import type { ModelReasoningEffort, WebSearchMode } from '@archon/workflows/schemas/workflow';
-export type { ModelReasoningEffort, WebSearchMode };
 import type {
   EffortLevel,
   ThinkingConfig,

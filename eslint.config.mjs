@@ -17,6 +17,11 @@ export default tseslint.config(
       'worktrees/**',
       '.claude/worktrees/**',
       '.claude/skills/**',
+      // Vendored obra/superpowers content — maintained upstream, synced via
+      // scripts/sync-superpowers.ts. Skill asset files (examples, scripts) are
+      // not part of any Archon tsconfig and must not be type-lint-checked.
+      '.archon/skills/defaults/**',
+      '.archon/agents/defaults/**',
       '**/*.generated.ts', // Auto-generated source files (content inlined via JSON.stringify)
       '**/*.js',
       '*.mjs',

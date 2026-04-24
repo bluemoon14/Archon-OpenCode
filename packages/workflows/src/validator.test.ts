@@ -211,20 +211,6 @@ describe('validateWorkflowResources — MCP validation', () => {
     const mcpErrors = issues.filter(i => i.field === 'mcp' && i.level === 'error');
     expect(mcpErrors).toHaveLength(0);
   });
-
-  test('warns when MCP used with codex provider', async () => {
-    const mcpPath = join(tmpDir, 'good.json');
-    await writeFile(mcpPath, '{"server": {"command": "npx"}}');
-    const workflow = makeWorkflow(
-      'test',
-      [{ id: 'step1', prompt: 'do stuff', mcp: mcpPath } as unknown as DagNode],
-      'codex'
-    );
-    const issues = await validateWorkflowResources(workflow, tmpDir);
-    const mcpWarnings = issues.filter(i => i.field === 'mcp' && i.level === 'warning');
-    expect(mcpWarnings).toHaveLength(1);
-    expect(mcpWarnings[0].message).toContain('not supported by provider');
-  });
 });
 
 // =============================================================================
@@ -409,19 +395,6 @@ describe('validateWorkflowResources — agents capability', () => {
     'brief-gen': { description: 'd', prompt: 'p' },
   };
 
-  test('warns when provider does not support inline agents (codex)', async () => {
-    const workflow = makeWorkflow(
-      'test',
-      [{ id: 'step1', prompt: 'p', agents: agentsField } as unknown as DagNode],
-      'codex'
-    );
-    const issues = await validateWorkflowResources(workflow, tmpDir);
-    const warning = issues.find(i => i.level === 'warning' && i.field === 'agents');
-    expect(warning).toBeDefined();
-    expect(warning!.message).toContain("not supported by provider 'codex'");
-    expect(warning!.hint).toContain('claude');
-  });
-
   test('no agents-capability warning when provider is claude', async () => {
     const workflow = makeWorkflow(
       'test',
@@ -437,7 +410,7 @@ describe('validateWorkflowResources — agents capability', () => {
     const workflow = makeWorkflow(
       'test',
       [{ id: 'step1', prompt: 'p' } as unknown as DagNode],
-      'codex'
+      'claude'
     );
     const issues = await validateWorkflowResources(workflow, tmpDir);
     const warning = issues.find(i => i.level === 'warning' && i.field === 'agents');

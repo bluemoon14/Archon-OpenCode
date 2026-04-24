@@ -19,67 +19,76 @@ export interface ClaudeProviderDefaults {
   claudeBinaryPath?: string;
 }
 
-export interface CodexProviderDefaults {
+export interface OpenCodeProviderDefaults {
   [key: string]: unknown;
   model?: string;
-  /** Structurally matches @archon/workflows ModelReasoningEffort */
-  modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-  /** Structurally matches @archon/workflows WebSearchMode */
-  webSearchMode?: 'disabled' | 'cached' | 'live';
-  additionalDirectories?: string[];
-  /** Path to the Codex CLI binary. Overrides auto-detection in compiled Archon builds. */
-  codexBinaryPath?: string;
+  /** Absolute path to the `opencode` binary. Required in compiled Archon
+   *  builds when `OPENCODE_BIN_PATH` is not set; optional in dev mode where
+   *  autodetection covers the common install locations. */
+  opencodeBinaryPath?: string;
+  /** Escape hatch: point at an externally-managed `opencode serve` instance.
+   *  When set, Archon does NOT spawn a child process and treats the URL as
+   *  the SDK base URL. */
+  baseUrl?: string;
+  /** Per-upstream-provider credentials passed through to `opencode serve` at
+   *  spawn time. Values are env-var NAMES (e.g. `OPENAI_API_KEY`), not the
+   *  secrets themselves — no secrets in YAML. */
+  providers?: Record<string, { authTokenEnv?: string }>;
+}
+
+export interface PydanticProviderDefaults {
+  [key: string]: unknown;
+  /** Absolute path to the `uv` binary (https://docs.astral.sh/uv). Required
+   *  in compiled builds when `UV_BIN_PATH` is not set; optional in dev mode. */
+  uvBinaryPath?: string;
+  /** Directory (relative to repo root) scanned for agent entry files.
+   *  @default '.archon/agents' */
+  agentsDir?: string;
+  /** Named Pydantic AI agents, each pointing at a user-authored Python file
+   *  that exports an `agent: pydantic_ai.Agent`. Selected per-node via the
+   *  `agent:` field on workflow YAML. */
+  agents?: Record<string, { entry: string; deps?: string[] }>;
 }
 
 /**
- * Community provider defaults for Pi (@mariozechner/pi-coding-agent).
- * v1 minimal shape; extend as capabilities are wired in.
+ * LiteLLM provider defaults. LiteLLM runs as an external OpenAI-compatible
+ * proxy (https://docs.litellm.ai/docs/simple_proxy). Archon points the OpenAI
+ * SDK at it and routes canonical `provider/model` names to the configured
+ * upstream list (Anthropic, OpenAI, Azure AI Foundry, Novita, ...).
  */
-export interface PiProviderDefaults {
+export interface LiteLLMProviderDefaults {
   [key: string]: unknown;
-  /** Default model ref in '<pi-provider-id>/<model-id>' format, e.g. 'google/gemini-2.5-pro' */
+  /** Default model string when a node/workflow does not specify one. Should
+   *  follow LiteLLM canonical form — e.g. `openai/gpt-4o`, `anthropic/claude-
+   *  sonnet-4-5`, `azure_ai/claude-sonnet-4-5`, `novita/meta-llama/...`. */
   model?: string;
-  /**
-   * Opt-in to Pi's extension discovery (tools + lifecycle hooks from community
-   * packages — see https://shittycodingagent.ai/packages). When true, Pi loads
-   * extensions from `~/.pi/agent/extensions/`, `~/.pi/agent/settings.json`
-   * packages, AND the workflow's cwd (`<cwd>/.pi/extensions/`,
-   * `<cwd>/.pi/settings.json`). The cwd scope is the risky one — a workflow
-   * running against an untrusted repo can auto-load whatever extension code
-   * that repo ships. Disabled by default to preserve the "Archon is source of
-   * truth" trust boundary. Flip to true only on hosts whose workflows run
-   * against repos you trust.
-   * @default false
-   */
-  enableExtensions?: boolean;
-  /**
-   * Bind an `ExtensionUIContext` so extensions see `ctx.hasUI === true` and
-   * `ctx.ui.notify()` forwards into the chunk stream. Ignored unless
-   * `enableExtensions` is true.
-   * @default false
-   */
-  interactive?: boolean;
-  /**
-   * Flag values passed to Pi's ExtensionRunner before `session_start`,
-   * equivalent to `pi --<name>` / `pi --<name>=<value>` on the CLI.
-   * Unknown keys are ignored. Only applied when `enableExtensions` is true.
-   * @default undefined
-   */
-  extensionFlags?: Record<string, boolean | string>;
-  /**
-   * Environment variables injected into `process.env` at session start so
-   * in-process extensions (which read `process.env` directly) pick them up.
-   * Existing `process.env` entries are NOT overridden — shell env wins over
-   * config. Use for extension-config vars like `PLANNOTATOR_REMOTE=1` that
-   * must be present before the extension's `session_start` hook runs.
-   *
-   * Note: this differs from `requestOptions.env` (codebase-scoped env vars),
-   * which is per-request and only injected into bash subprocesses. Use
-   * codebase env vars for secrets that vary per project; use `assistants.pi.env`
-   * for extension wiring that's global to the Pi provider.
-   * @default undefined
-   */
-  env?: Record<string, string>;
+  /** Absolute path to the `litellm` binary (used when Archon spawns its own
+   *  proxy). Optional in dev mode (PATH lookup handles common install paths). */
+  litellmBinaryPath?: string;
+  /** Escape hatch: point at an externally-managed LiteLLM proxy. When set,
+   *  Archon does NOT spawn a subprocess and uses this URL as the OpenAI SDK
+   *  base URL. Should include the `/v1` suffix only if your proxy requires it
+   *  (the OpenAI SDK appends `/chat/completions` etc. automatically). */
+  baseUrl?: string;
+  /** Absolute path to the proxy's `litellm_config.yaml` (the `model_list`
+   *  declaration). Default: `~/.archon/litellm_config.yaml`. */
+  configPath?: string;
+  /** TCP port for the spawned proxy. Default: 4000. */
+  port?: number;
+  /** Env var NAME that holds the master key used to authenticate against the
+   *  proxy. Default: `LITELLM_MASTER_KEY`. Values are never stored in YAML —
+   *  only the variable name is. */
+  masterKeyEnv?: string;
+  /** Per-upstream-provider credential mapping. Values are env var NAMES that
+   *  hold each upstream's API key / base URL. Archon ensures they're present
+   *  in the proxy's environment before spawning. */
+  providers?: Record<
+    string,
+    {
+      authTokenEnv?: string;
+      apiBaseEnv?: string;
+    }
+  >;
 }
 
 /** Generic per-provider defaults bag used by config surfaces and UI. */
@@ -107,9 +116,7 @@ export type MessageChunk =
       type: 'assistant';
       content: string;
       /** When true, batch-mode adapters flush pending content and this chunk
-       *  to the platform immediately. Used by Pi's `notify()` so URLs the
-       *  user must act on (e.g. plannotator review) surface before the node
-       *  blocks for input. */
+       *  to the platform immediately. */
       flush?: boolean;
     }
   | { type: 'system'; content: string }
@@ -211,7 +218,49 @@ export interface NodeConfig {
   systemPrompt?: string;
   fallbackModel?: string;
   idle_timeout?: number;
+  /** Named provider-scoped selector. Today only Pydantic AI uses it: the
+   *  value names a pre-configured agent under `assistants.pydantic.agents`.
+   *  Schema-level validator requires `provider: pydantic` when present. */
+  agent?: string;
   [key: string]: unknown;
+}
+
+/**
+ * Skill content pre-loaded by Archon's SkillAgentRegistry and handed to the
+ * provider as a ready-to-use system-prompt contribution. Providers should
+ * inject `body` as instruction for the owning agent rather than expecting the
+ * underlying SDK to look up the skill by name. `model` is already resolved
+ * through the 8-tier precedence — no further resolution needed.
+ *
+ * When `resolvedSkills` is empty or absent, providers fall back to the raw
+ * `nodeConfig.skills: string[]` array (SDK-native lookup for Claude, no-op
+ * for OpenCode/Pydantic). This preserves back-compat with `~/.claude/skills/`.
+ */
+export interface ResolvedSkillHandoff {
+  name: string;
+  description: string;
+  body: string;
+  /** Final model string (LiteLLM canonical, Claude shorthand, or alias). */
+  model: string;
+}
+
+/**
+ * Agent content merged by the DAG executor from the SkillAgentRegistry +
+ * inline workflow-YAML override. Providers treat this as authoritative and
+ * install it in their SDK's agent slot. Inline overrides (from
+ * `nodeConfig.agents[id]`) have already won over registry defaults — no
+ * further merging on the provider side.
+ */
+export interface ResolvedAgentHandoff {
+  /** The key used under `nodeConfig.agents` — provider's SDK agent slot name. */
+  id: string;
+  description: string;
+  prompt: string;
+  model: string;
+  tools?: string[];
+  disallowedTools?: string[];
+  skills?: string[];
+  maxTurns?: number;
 }
 
 /**
@@ -224,6 +273,14 @@ export interface SendQueryOptions extends AgentRequestOptions {
   nodeConfig?: NodeConfig;
   /** Per-provider defaults from .archon/config.yaml assistants section. */
   assistantConfig?: Record<string, unknown>;
+  /**
+   * Pre-resolved skill content from Archon's SkillAgentRegistry. When present,
+   * providers use these bodies directly instead of relying on SDK-side lookup.
+   * Populated by the DAG executor when a skill-agent registry is configured.
+   */
+  resolvedSkills?: ResolvedSkillHandoff[];
+  /** Pre-resolved agent content with registry defaults + inline overrides merged. */
+  resolvedAgents?: ResolvedAgentHandoff[];
 }
 
 /**
@@ -288,17 +345,9 @@ export interface ProviderInfo {
 }
 
 /**
- * Generic agent provider interface.
- * Allows supporting multiple agent providers (Claude, Codex, etc.)
+ * Generic agent provider interface. Built-ins: Claude, OpenCode, Pydantic AI.
  */
 export interface IAgentProvider {
-  /**
-   * Send a message and get streaming response.
-   * @param prompt - User message or prompt
-   * @param cwd - Working directory for the provider
-   * @param resumeSessionId - Optional session ID to resume
-   * @param options - Optional request options (universal + nodeConfig + assistantConfig)
-   */
   sendQuery(
     prompt: string,
     cwd: string,
@@ -306,14 +355,7 @@ export interface IAgentProvider {
     options?: SendQueryOptions
   ): AsyncGenerator<MessageChunk>;
 
-  /**
-   * Get the provider type identifier (e.g. 'claude', 'codex').
-   */
   getType(): string;
 
-  /**
-   * Get the provider's capability flags.
-   * Used by the dag-executor to warn when nodes specify unsupported features.
-   */
   getCapabilities(): ProviderCapabilities;
 }

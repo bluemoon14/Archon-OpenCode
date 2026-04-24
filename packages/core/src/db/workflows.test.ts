@@ -565,13 +565,9 @@ describe('workflows database', () => {
       await getActiveWorkflowRunByPath('/repo/path');
 
       const [query] = mockQuery.mock.calls[0] as [string, unknown[]];
-      // Fresh `pending` counts as active so the lock is held immediately
-      // after pre-create — without this, two near-simultaneous dispatches
-      // both pass the guard.
       expect(query).toContain("status = 'pending'");
-      // Age window cutoff prevents orphaned pending rows (from crashed
-      // dispatches) from permanently blocking a path.
-      expect(query).toMatch(/started_at >.*INTERVAL.*milliseconds/);
+      // SQLite age window: `datetime('now', '-N seconds')`.
+      expect(query).toMatch(/started_at >.*datetime\('now'/);
     });
 
     test('excludes self and applies older-wins tiebreaker when self is provided', async () => {
@@ -582,13 +578,9 @@ describe('workflows database', () => {
 
       const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
       expect(query).toContain('id != $2');
-      // PostgreSQL branch: explicit `::timestamptz` cast on the param so
-      // the comparison is chronological, not lexical. SQLite branch wraps
-      // both sides in datetime() — covered by tests in adapters/sqlite.test.ts
-      // because this suite mocks getDatabaseType as 'postgresql'.
-      expect(query).toContain('started_at < $3::timestamptz');
-      expect(query).toContain('started_at = $3::timestamptz AND id < $2');
-      // selfStartedAt serialized to ISO — bun:sqlite rejects Date bindings.
+      // SQLite: wrap both sides in datetime() for chronological comparison.
+      expect(query).toContain('datetime(started_at) < datetime($3)');
+      expect(query).toContain('datetime(started_at) = datetime($3) AND id < $2');
       expect(params).toEqual(['/repo/path', 'self-id', startedAt.toISOString()]);
     });
 
@@ -803,13 +795,13 @@ describe('workflows database', () => {
       expect(commitSql).toBe('COMMIT');
     });
 
-    test('uses PostgreSQL INTERVAL syntax', async () => {
+    test('uses SQLite datetime syntax for cutoff', async () => {
       mockQuery.mockResolvedValue(createQueryResult([], 0));
 
       await deleteOldWorkflowRuns(7);
 
       const [eventsSql] = mockQuery.mock.calls[1] as [string, unknown[]];
-      expect(eventsSql).toContain("INTERVAL '7 days'");
+      expect(eventsSql).toContain("datetime('now', '-7 days')");
     });
 
     test('validates olderThanDays is a non-negative integer', async () => {

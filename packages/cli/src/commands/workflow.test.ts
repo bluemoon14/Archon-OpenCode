@@ -262,17 +262,15 @@ describe('workflowListCommand', () => {
     expect(() => JSON.parse(output)).not.toThrow();
   });
 
-  it('should include modelReasoningEffort and webSearchMode in JSON output when present', async () => {
+  it('should include provider/model in JSON output when present', async () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
       workflows: [
         makeTestWorkflowWithSource({
           name: 'plan',
           description: 'Planning workflow',
-          provider: 'codex',
-          model: 'gpt-5.3-codex',
-          modelReasoningEffort: 'high',
-          webSearchMode: 'live',
+          provider: 'claude',
+          model: 'sonnet',
         }),
       ],
       errors: [],
@@ -288,10 +286,8 @@ describe('workflowListCommand', () => {
     expect(parsed.workflows[0]).toEqual({
       name: 'plan',
       description: 'Planning workflow',
-      provider: 'codex',
-      model: 'gpt-5.3-codex',
-      modelReasoningEffort: 'high',
-      webSearchMode: 'live',
+      provider: 'claude',
+      model: 'sonnet',
     });
   });
 

@@ -8,12 +8,10 @@ import {
   getProviderInfoList,
   isRegisteredProvider,
   registerBuiltinProviders,
-  registerCommunityProviders,
   clearRegistry,
 } from './registry';
-import { registerPiProvider } from './community/pi/registration';
 import { UnknownProviderError } from './errors';
-import type { ProviderRegistration, IAgentProvider, ProviderCapabilities } from './types';
+import type { ProviderRegistration, IAgentProvider } from './types';
 
 /** Minimal mock provider for testing registration. */
 function makeMockProvider(id: string): IAgentProvider {
@@ -70,18 +68,10 @@ describe('registry', () => {
       expect(typeof provider.sendQuery).toBe('function');
     });
 
-    test('returns CodexProvider for codex type', () => {
-      const provider = getAgentProvider('codex');
-
-      expect(provider).toBeDefined();
-      expect(provider.getType()).toBe('codex');
-      expect(typeof provider.sendQuery).toBe('function');
-    });
-
     test('throws UnknownProviderError for unknown type', () => {
       expect(() => getAgentProvider('unknown')).toThrow(UnknownProviderError);
       expect(() => getAgentProvider('unknown')).toThrow(
-        "Unknown provider: 'unknown'. Available: claude, codex"
+        "Unknown provider: 'unknown'. Available: claude"
       );
     });
 
@@ -104,18 +94,12 @@ describe('registry', () => {
 
     test('providers expose getCapabilities', () => {
       const claude = getAgentProvider('claude');
-      const codex = getAgentProvider('codex');
 
       expect(typeof claude.getCapabilities).toBe('function');
-      expect(typeof codex.getCapabilities).toBe('function');
 
       const claudeCaps = claude.getCapabilities();
-      const codexCaps = codex.getCapabilities();
-
       expect(claudeCaps.mcp).toBe(true);
-      expect(codexCaps.mcp).toBe(false);
       expect(claudeCaps.hooks).toBe(true);
-      expect(codexCaps.hooks).toBe(false);
     });
   });
 
@@ -127,22 +111,9 @@ describe('registry', () => {
       expect(caps.envInjection).toBe(true);
     });
 
-    test('returns Codex capabilities without instantiation', () => {
-      const caps = getProviderCapabilities('codex');
-      expect(caps.mcp).toBe(false);
-      expect(caps.hooks).toBe(false);
-      expect(caps.envInjection).toBe(true);
-    });
-
     test('matches runtime getCapabilities for Claude', () => {
       const staticCaps = getProviderCapabilities('claude');
       const runtimeCaps = getAgentProvider('claude').getCapabilities();
-      expect(staticCaps).toEqual(runtimeCaps);
-    });
-
-    test('matches runtime getCapabilities for Codex', () => {
-      const staticCaps = getProviderCapabilities('codex');
-      const runtimeCaps = getAgentProvider('codex').getCapabilities();
       expect(staticCaps).toEqual(runtimeCaps);
     });
 
@@ -194,23 +165,24 @@ describe('registry', () => {
   describe('getRegisteredProviders', () => {
     test('returns all registered providers', () => {
       const all = getRegisteredProviders();
-      expect(all.length).toBe(2);
-      const ids = all.map(r => r.id);
-      expect(ids).toContain('claude');
-      expect(ids).toContain('codex');
+      expect(all.length).toBe(4);
+      expect(all.map(r => r.id)).toContain('claude');
+      expect(all.map(r => r.id)).toContain('opencode');
+      expect(all.map(r => r.id)).toContain('pydantic');
+      expect(all.map(r => r.id)).toContain('litellm');
     });
 
-    test('includes community providers after registration', () => {
+    test('includes additional providers after registration', () => {
       registerProvider(makeMockRegistration('my-llm'));
       const all = getRegisteredProviders();
-      expect(all.length).toBe(3);
+      expect(all.length).toBe(5);
     });
   });
 
   describe('getProviderInfoList', () => {
     test('returns API-safe projection without factory', () => {
       const infos = getProviderInfoList();
-      expect(infos.length).toBe(2);
+      expect(infos.length).toBe(4);
       for (const info of infos) {
         expect(info).toHaveProperty('id');
         expect(info).toHaveProperty('displayName');
@@ -225,7 +197,6 @@ describe('registry', () => {
   describe('isRegisteredProvider', () => {
     test('returns true for registered providers', () => {
       expect(isRegisteredProvider('claude')).toBe(true);
-      expect(isRegisteredProvider('codex')).toBe(true);
     });
 
     test('returns false for unknown providers', () => {
@@ -239,7 +210,7 @@ describe('registry', () => {
       registerBuiltinProviders();
       registerBuiltinProviders();
       const all = getRegisteredProviders();
-      expect(all.length).toBe(2);
+      expect(all.length).toBe(4);
     });
   });
 
@@ -262,94 +233,36 @@ describe('registry', () => {
       expect(reg.isModelCompatible('gpt-4')).toBe(false);
     });
 
-    test('Codex registration rejects Claude model patterns', () => {
-      const reg = getRegistration('codex');
+    test('LiteLLM registration matches canonical upstream prefixes', () => {
+      const reg = getRegistration('litellm');
+      expect(reg.isModelCompatible('anthropic/claude-sonnet-4-5')).toBe(true);
+      expect(reg.isModelCompatible('openai/gpt-4o')).toBe(true);
+      expect(reg.isModelCompatible('azure/my-deployment')).toBe(true);
+      expect(reg.isModelCompatible('azure_ai/claude-sonnet-4-5')).toBe(true);
+      expect(reg.isModelCompatible('novita/meta-llama/llama-3.1')).toBe(true);
       expect(reg.isModelCompatible('sonnet')).toBe(false);
-      expect(reg.isModelCompatible('claude-3.5-sonnet')).toBe(false);
-      expect(reg.isModelCompatible('inherit')).toBe(false);
-      expect(reg.isModelCompatible('gpt-4')).toBe(true);
-      expect(reg.isModelCompatible('o3-mini')).toBe(true);
-    });
-  });
-
-  describe('registerCommunityProviders (aggregator)', () => {
-    test('registers all bundled community providers', () => {
-      registerCommunityProviders();
-      // Pi is currently the only community provider bundled. When more are
-      // added, they should appear here automatically.
-      expect(isRegisteredProvider('pi')).toBe(true);
+      expect(reg.isModelCompatible('opencode/gpt-4o')).toBe(false);
+      expect(reg.isModelCompatible('google/gemini-1.5')).toBe(false);
     });
 
-    test('is idempotent', () => {
-      registerCommunityProviders();
-      expect(() => registerCommunityProviders()).not.toThrow();
-      const piCount = getRegisteredProviders().filter(p => p.id === 'pi').length;
-      expect(piCount).toBe(1);
-    });
-  });
-
-  describe('registerPiProvider (community provider)', () => {
-    test('registers pi with builtIn: false', () => {
-      registerPiProvider();
-      const reg = getRegistration('pi');
-      expect(reg.id).toBe('pi');
-      expect(reg.displayName).toBe('Pi (community)');
-      expect(reg.builtIn).toBe(false);
+    test('OpenCode does NOT claim LiteLLM prefixes anymore', () => {
+      // Regression guard: before Increment 3, OpenCode matched any
+      // `<provider>/<model>` shape and would have stolen anthropic/, openai/,
+      // azure_ai/, novita/ routing from LiteLLM.
+      const reg = getRegistration('opencode');
+      expect(reg.isModelCompatible('anthropic/claude-sonnet-4-5')).toBe(false);
+      expect(reg.isModelCompatible('openai/gpt-4o')).toBe(false);
+      expect(reg.isModelCompatible('azure/whatever')).toBe(false);
+      expect(reg.isModelCompatible('azure_ai/claude')).toBe(false);
+      expect(reg.isModelCompatible('novita/anything')).toBe(false);
+      // Still accepts its own prefix and other non-LiteLLM routes.
+      expect(reg.isModelCompatible('opencode/gpt-4o')).toBe(true);
+      expect(reg.isModelCompatible('google/gemini-1.5')).toBe(true);
     });
 
-    test('is idempotent', () => {
-      registerPiProvider();
-      expect(() => registerPiProvider()).not.toThrow();
-      const piEntries = getRegisteredProviders().filter(p => p.id === 'pi');
-      expect(piEntries).toHaveLength(1);
-    });
-
-    test('declares v2 capabilities (thinking, effort, tools, skills, sessionResume, envInjection, structuredOutput supported)', () => {
-      registerPiProvider();
-      const caps = getProviderCapabilities('pi');
-      // Flipped true in v2
-      expect(caps.thinkingControl).toBe(true);
-      expect(caps.effortControl).toBe(true);
-      expect(caps.toolRestrictions).toBe(true);
-      expect(caps.skills).toBe(true);
-      expect(caps.sessionResume).toBe(true);
-      expect(caps.envInjection).toBe(true);
-      // Best-effort structured output via prompt engineering + post-parse —
-      // not SDK-enforced like Claude/Codex, but wired up and tested.
-      expect(caps.structuredOutput).toBe(true);
-      // Still false (out of v2 scope)
-      expect(caps.mcp).toBe(false);
-      expect(caps.hooks).toBe(false);
-      expect(caps.costControl).toBe(false);
-      expect(caps.fallbackModel).toBe(false);
-      expect(caps.sandbox).toBe(false);
-    });
-
-    test('isModelCompatible accepts provider/model refs, rejects aliases', () => {
-      registerPiProvider();
-      const reg = getRegistration('pi');
-      expect(reg.isModelCompatible('google/gemini-2.5-pro')).toBe(true);
-      expect(reg.isModelCompatible('anthropic/claude-opus-4-5')).toBe(true);
-      expect(reg.isModelCompatible('openrouter/qwen/qwen3-coder')).toBe(true);
-      expect(reg.isModelCompatible('sonnet')).toBe(false);
-      expect(reg.isModelCompatible('claude-3.5-sonnet')).toBe(false);
-      expect(reg.isModelCompatible('')).toBe(false);
-    });
-
-    test('appears in getProviderInfoList with builtIn: false', () => {
-      registerPiProvider();
-      const info = getProviderInfoList().find(p => p.id === 'pi');
-      expect(info).toBeDefined();
-      expect(info?.builtIn).toBe(false);
-    });
-
-    test('does not collide with built-ins', () => {
-      // beforeEach already called registerBuiltinProviders + clearRegistry reset
-      registerPiProvider();
-      const ids = getRegisteredProviders()
-        .map(p => p.id)
-        .sort();
-      expect(ids).toEqual(['claude', 'codex', 'pi']);
+    test('registering built-ins includes litellm', () => {
+      const all = getRegisteredProviders();
+      expect(all.map(r => r.id)).toContain('litellm');
     });
   });
 });

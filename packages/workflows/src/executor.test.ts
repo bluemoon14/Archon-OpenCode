@@ -100,7 +100,6 @@ function makeDeps(store?: IWorkflowStore): WorkflowDeps {
         assistant: 'claude' as const,
         assistants: {
           claude: {},
-          codex: {},
         },
         baseBranch: '',
         commands: { folder: '' },
@@ -446,22 +445,6 @@ describe('executeWorkflow', () => {
       );
       expect(mockExecuteDagWorkflow).toHaveBeenCalledTimes(1);
     });
-
-    it('throws when model is incompatible with explicit provider', async () => {
-      const store = makeStore();
-      const deps = makeDeps(store);
-      await expect(
-        executeWorkflow(
-          deps,
-          makePlatform(),
-          'conv-1',
-          '/tmp',
-          makeWorkflow({ provider: 'codex', model: 'sonnet' }),
-          'test message',
-          'db-conv-1'
-        )
-      ).rejects.toThrow('not compatible');
-    });
   });
 
   // -------------------------------------------------------------------------
@@ -494,7 +477,7 @@ describe('executeWorkflow', () => {
         loadConfig: mock(
           async (): Promise<WorkflowConfig> => ({
             assistant: 'claude' as const,
-            assistants: { claude: {}, codex: {} },
+            assistants: { claude: {} },
             baseBranch: '',
             commands: { folder: '' },
             docsPath: 'packages/docs-web/src/content/docs',
@@ -697,7 +680,7 @@ describe('executeWorkflow', () => {
       // Override loadConfig to return file-level envVars
       (deps.loadConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
         assistant: 'claude' as const,
-        assistants: { claude: {}, codex: {} },
+        assistants: { claude: {} },
         baseBranch: '',
         commands: { folder: '' },
         envVars: { FILE_KEY: 'file_val' },

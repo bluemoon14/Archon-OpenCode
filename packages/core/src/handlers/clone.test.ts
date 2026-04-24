@@ -499,37 +499,7 @@ describe('cloneRepository', () => {
 
   // ── Assistant type detection ───────────────────────────────────────────
   describe('assistant type detection', () => {
-    test('detects codex assistant when .codex folder exists', async () => {
-      // access(): first call is for .git (does not exist), then .codex (exists), then command search
-      let callIndex = 0;
-      spyFsAccess.mockImplementation((path: string) => {
-        if (typeof path === 'string' && path.endsWith('.codex')) {
-          return Promise.resolve(undefined);
-        }
-        if (typeof path === 'string' && path.endsWith('.git')) {
-          callIndex++;
-          // First call is the .git existence check (must REJECT to proceed to clone)
-          if (callIndex === 1)
-            return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-        }
-        return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-      });
-      mockCreateCodebase.mockResolvedValueOnce(
-        makeCodebase({ ai_assistant_type: 'codex' }) as ReturnType<typeof makeCodebase>
-      );
-
-      await cloneRepository('https://github.com/owner/repo');
-
-      const createCall = mockCreateCodebase.mock.calls[0] as [
-        {
-          name: string;
-          ai_assistant_type: string;
-        },
-      ];
-      expect(createCall[0].ai_assistant_type).toBe('codex');
-    });
-
-    test('defaults to claude when neither .codex nor .claude folder exists', async () => {
+    test('defaults to claude when no .claude folder exists', async () => {
       spyFsAccess.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
       mockCreateCodebase.mockResolvedValueOnce(
         makeCodebase({ ai_assistant_type: 'claude' }) as ReturnType<typeof makeCodebase>
@@ -541,9 +511,9 @@ describe('cloneRepository', () => {
       expect(createCall[0].ai_assistant_type).toBe('claude');
     });
 
-    test('detects claude assistant when .claude folder exists but .codex does not', async () => {
+    test('detects claude assistant when .claude folder exists', async () => {
       spyFsAccess.mockImplementation((path: string) => {
-        // .codex → ENOENT, .claude → exists, .git → ENOENT, commands → ENOENT
+        // .claude → exists, .git → ENOENT, commands → ENOENT
         if (typeof path === 'string' && path.endsWith('.claude')) {
           return Promise.resolve(undefined);
         }
@@ -714,7 +684,7 @@ describe('registerRepository', () => {
         return Promise.resolve({ stdout: 'https://github.com/owner/repo', stderr: '' });
       return Promise.resolve({ stdout: '', stderr: '' });
     });
-    // access(): only the command folder path succeeds; .codex/.claude → ENOENT
+    // access(): only the command folder path succeeds; .claude → ENOENT
     spyFsAccess.mockImplementation((path: string) => {
       const normalized = typeof path === 'string' ? path.replace(/\\/g, '/') : '';
       if (normalized.includes('.archon/commands')) {

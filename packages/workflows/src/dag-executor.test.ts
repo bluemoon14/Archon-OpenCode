@@ -115,23 +115,6 @@ const mockClaudeCapabilities = () => ({
   fallbackModel: true,
   sandbox: true,
 });
-/** Limited capabilities for Codex mock */
-const mockCodexCapabilities = () => ({
-  sessionResume: true,
-  mcp: false,
-  hooks: false,
-  skills: false,
-  agents: false,
-  toolRestrictions: false,
-  structuredOutput: true,
-  envInjection: true,
-  costControl: false,
-  effortControl: false,
-  thinkingControl: false,
-  fallbackModel: false,
-  sandbox: false,
-});
-
 /** Mock AI sendQuery generator */
 const mockSendQueryDag = mock(function* () {
   yield { type: 'assistant', content: 'DAG AI response' };
@@ -154,7 +137,7 @@ function createMockDeps(storeOverride?: IWorkflowStore): WorkflowDeps {
         assistant: 'claude' as const,
         commands: {},
         defaults: { loadDefaultCommands: false, loadDefaultWorkflows: false },
-        assistants: { claude: {}, codex: {} },
+        assistants: { claude: {} },
       })
     ),
   };
@@ -171,7 +154,7 @@ function createMockPlatform(): IWorkflowPlatform {
 
 const minimalConfig: WorkflowConfig = {
   assistant: 'claude',
-  assistants: { claude: {}, codex: {} },
+  assistants: { claude: {} },
   commands: {},
   defaults: { loadDefaultCommands: false, loadDefaultWorkflows: false },
 };
@@ -841,46 +824,6 @@ describe('executeDagWorkflow -- tool restrictions', () => {
     expect(nodeConfig?.allowed_tools).toEqual(['Read', 'Grep']);
   });
 
-  it('warns user when Codex DAG node has denied_tools only', async () => {
-    mockGetAgentProviderDag.mockReturnValue({
-      sendQuery: mockSendQueryDag,
-      getType: () => 'codex',
-      getCapabilities: mockCodexCapabilities,
-    });
-
-    const mockDeps = createMockDeps();
-    const platform = createMockPlatform();
-    const workflowRun = makeWorkflowRun();
-
-    await executeDagWorkflow(
-      mockDeps,
-      platform,
-      'conv-dag',
-      testDir,
-      {
-        name: 'dag-codex-denied',
-        nodes: [
-          { id: 'review', command: 'my-cmd', provider: 'codex', denied_tools: ['WebSearch'] },
-        ],
-      },
-      workflowRun,
-      'codex',
-      undefined,
-      join(testDir, 'artifacts'),
-      join(testDir, 'logs'),
-      'main',
-      'docs/',
-      { ...minimalConfig, assistant: 'codex' }
-    );
-
-    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
-    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
-    const warning = messages.find(
-      m => m.includes('allowed_tools/denied_tools') && m.includes('codex')
-    );
-    expect(warning).toBeDefined();
-  });
-
   it('passes empty allowed_tools: [] (disable all tools) to sendQuery', async () => {
     const mockDeps = createMockDeps();
     const platform = createMockPlatform();
@@ -946,51 +889,6 @@ describe('executeDagWorkflow -- tool restrictions', () => {
     expect(nodeConfig?.hooks).toBeDefined();
     const hooks = nodeConfig?.hooks as Record<string, unknown[]>;
     expect(hooks.PreToolUse).toHaveLength(1);
-  });
-
-  it('warns user when Codex DAG node has hooks', async () => {
-    mockGetAgentProviderDag.mockReturnValue({
-      sendQuery: mockSendQueryDag,
-      getType: () => 'codex',
-      getCapabilities: mockCodexCapabilities,
-    });
-
-    const mockDeps = createMockDeps();
-    const platform = createMockPlatform();
-    const workflowRun = makeWorkflowRun();
-
-    await executeDagWorkflow(
-      mockDeps,
-      platform,
-      'conv-dag',
-      testDir,
-      {
-        name: 'dag-codex-hooks',
-        nodes: [
-          {
-            id: 'review',
-            command: 'my-cmd',
-            provider: 'codex',
-            hooks: {
-              PreToolUse: [{ response: { decision: 'block' } }],
-            },
-          },
-        ],
-      },
-      workflowRun,
-      'codex',
-      undefined,
-      join(testDir, 'artifacts'),
-      join(testDir, 'logs'),
-      'main',
-      'docs/',
-      { ...minimalConfig, assistant: 'codex' }
-    );
-
-    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
-    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
-    const warning = messages.find(m => m.includes('hooks') && m.includes('codex'));
-    expect(warning).toBeDefined();
   });
 });
 
@@ -1472,129 +1370,6 @@ describe('executeDagWorkflow -- output_format structured output', () => {
     // Second node's prompt should contain the concatenated text from node a
     const secondCallPrompt = mockSendQueryDag.mock.calls[1][0] as string;
     expect(secondCallPrompt).toContain('plain text response');
-  });
-
-  it('passes outputFormat to Codex nodes and uses inline JSON response', async () => {
-    // Codex provider normalizes inline JSON into structuredOutput on the result chunk
-    const classifyJson = { run_code_review: 'true', run_tests: 'false' };
-    mockGetAgentProviderDag.mockImplementation(() => ({
-      sendQuery: mockSendQueryDag,
-      getType: () => 'codex',
-      getCapabilities: mockCodexCapabilities,
-    }));
-    mockSendQueryDag.mockImplementation(function* () {
-      yield { type: 'assistant', content: JSON.stringify(classifyJson) };
-      yield { type: 'result', sessionId: 'codex-sid-1', structuredOutput: classifyJson };
-    });
-
-    const mockDeps = createMockDeps();
-    const platform = createMockPlatform();
-    const workflowRun = makeWorkflowRun('codex-output-fmt-run', {
-      user_message: 'classify this PR',
-    });
-
-    const nodes: DagNode[] = [
-      {
-        id: 'classify',
-        command: 'classify',
-        output_format: {
-          type: 'object',
-          properties: {
-            run_code_review: { type: 'string', enum: ['true', 'false'] },
-            run_tests: { type: 'string', enum: ['true', 'false'] },
-          },
-        },
-      },
-      {
-        id: 'review',
-        prompt: 'Review the code',
-        depends_on: ['classify'],
-        when: "$classify.output.run_code_review == 'true'",
-      },
-      {
-        id: 'test',
-        prompt: 'Run tests',
-        depends_on: ['classify'],
-        when: "$classify.output.run_tests == 'true'",
-      },
-    ];
-
-    await executeDagWorkflow(
-      mockDeps,
-      platform,
-      'conv-codex-fmt',
-      testDir,
-      { name: 'codex-output-fmt', nodes },
-      workflowRun,
-      'codex',
-      undefined,
-      join(testDir, 'artifacts'),
-      join(testDir, 'logs'),
-      'main',
-      'docs/',
-      minimalConfig
-    );
-
-    // classify + review = 2 calls (test node skipped because run_tests == 'false')
-    expect(mockSendQueryDag.mock.calls.length).toBe(2);
-
-    // Verify outputFormat was passed to the Codex client (4th arg = options)
-    const classifyOptions = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
-    expect(classifyOptions.outputFormat).toEqual({
-      type: 'json_schema',
-      schema: nodes[0].output_format,
-    });
-  });
-
-  it('does not warn about missing structuredOutput for Codex nodes', async () => {
-    // Codex provider normalizes inline JSON into structuredOutput on the result chunk
-    mockGetAgentProviderDag.mockImplementation(() => ({
-      sendQuery: mockSendQueryDag,
-      getType: () => 'codex',
-      getCapabilities: mockCodexCapabilities,
-    }));
-    mockSendQueryDag.mockImplementation(function* () {
-      yield { type: 'assistant', content: '{"status":"ok"}' };
-      yield { type: 'result', sessionId: 'codex-sid-2', structuredOutput: { status: 'ok' } };
-    });
-
-    const mockDeps = createMockDeps();
-    const platform = createMockPlatform();
-    const workflowRun = makeWorkflowRun('codex-no-warn-run', {
-      user_message: 'check it',
-    });
-
-    const nodes: DagNode[] = [
-      {
-        id: 'check',
-        command: 'classify',
-        output_format: { type: 'object', properties: { status: { type: 'string' } } },
-      },
-    ];
-
-    await executeDagWorkflow(
-      mockDeps,
-      platform,
-      'conv-codex-no-warn',
-      testDir,
-      { name: 'codex-no-warn', nodes },
-      workflowRun,
-      'codex',
-      undefined,
-      join(testDir, 'artifacts'),
-      join(testDir, 'logs'),
-      'main',
-      'docs/',
-      minimalConfig
-    );
-
-    // Verify no "structured output missing" warning was sent to the user
-    const sendCalls = (platform.sendMessage as Mock<(...args: unknown[]) => Promise<void>>).mock
-      .calls;
-    const warningMessages = sendCalls
-      .map(call => call[1] as string)
-      .filter(msg => typeof msg === 'string' && msg.includes('did not return structured output'));
-    expect(warningMessages).toHaveLength(0);
   });
 });
 
@@ -2391,45 +2166,6 @@ describe('executeDagWorkflow -- skills options', () => {
     expect(nodeConfig?.allowed_tools).toEqual(['Read', 'Grep']);
   });
 
-  it('warns user when Codex DAG node has skills and does not pass agents', async () => {
-    mockGetAgentProviderDag.mockReturnValue({
-      sendQuery: mockSendQueryDag,
-      getType: () => 'codex',
-      getCapabilities: mockCodexCapabilities,
-    });
-
-    const mockDeps = createMockDeps();
-    const platform = createMockPlatform();
-    const workflowRun = makeWorkflowRun();
-
-    await executeDagWorkflow(
-      mockDeps,
-      platform,
-      'conv-dag',
-      testDir,
-      {
-        name: 'dag-codex-skills',
-        nodes: [
-          { id: 'review', command: 'my-cmd', provider: 'codex', skills: ['codebase-search'] },
-        ],
-      },
-      workflowRun,
-      'codex',
-      undefined,
-      join(testDir, 'artifacts'),
-      join(testDir, 'logs'),
-      'main',
-      'docs/',
-      { ...minimalConfig, assistant: 'codex' }
-    );
-
-    // Warning sent to user
-    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
-    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
-    const warning = messages.find(m => m.includes('skills') && m.includes('codex'));
-    expect(warning).toBeDefined();
-  });
-
   it('passes agents to sendQuery nodeConfig when node has inline agents', async () => {
     const mockDeps = createMockDeps();
     const platform = createMockPlatform();
@@ -2467,51 +2203,6 @@ describe('executeDagWorkflow -- skills options', () => {
     const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
     const nodeConfig = optionsArg?.nodeConfig as Record<string, unknown>;
     expect(nodeConfig?.agents).toEqual(agentsMap);
-  });
-
-  it('warns user when Codex DAG node has inline agents', async () => {
-    mockGetAgentProviderDag.mockReturnValue({
-      sendQuery: mockSendQueryDag,
-      getType: () => 'codex',
-      getCapabilities: mockCodexCapabilities,
-    });
-
-    const mockDeps = createMockDeps();
-    const platform = createMockPlatform();
-    const workflowRun = makeWorkflowRun();
-
-    await executeDagWorkflow(
-      mockDeps,
-      platform,
-      'conv-dag',
-      testDir,
-      {
-        name: 'dag-codex-agents',
-        nodes: [
-          {
-            id: 'review',
-            command: 'my-cmd',
-            provider: 'codex',
-            agents: {
-              'brief-gen': { description: 'd', prompt: 'p' },
-            },
-          },
-        ],
-      },
-      workflowRun,
-      'codex',
-      undefined,
-      join(testDir, 'artifacts'),
-      join(testDir, 'logs'),
-      'main',
-      'docs/',
-      { ...minimalConfig, assistant: 'codex' }
-    );
-
-    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
-    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
-    const warning = messages.find(m => m.includes('agents') && m.includes('codex'));
-    expect(warning).toBeDefined();
   });
 });
 
@@ -5114,42 +4805,6 @@ describe('executeDagWorkflow -- Claude SDK advanced options', () => {
     const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
     const nodeConfig = optionsArg?.nodeConfig as Record<string, unknown>;
     expect(nodeConfig?.effort).toBe('max');
-  });
-
-  it('warns user when Codex node has Claude-only options (effort)', async () => {
-    mockGetAgentProviderDag.mockImplementation(() => ({
-      sendQuery: mockSendQueryDag,
-      getType: () => 'codex',
-      getCapabilities: mockCodexCapabilities,
-    }));
-
-    const mockDeps = createMockDeps();
-    const platform = createMockPlatform();
-    const workflowRun = makeWorkflowRun();
-
-    await executeDagWorkflow(
-      mockDeps,
-      platform,
-      'conv-dag',
-      testDir,
-      {
-        name: 'codex-claude-opts-test',
-        nodes: [{ id: 'step1', command: 'my-cmd', provider: 'codex', effort: 'high' }],
-      },
-      workflowRun,
-      'codex',
-      undefined,
-      join(testDir, 'artifacts'),
-      join(testDir, 'logs'),
-      'main',
-      'docs/',
-      { ...minimalConfig, assistant: 'codex' }
-    );
-
-    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
-    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
-    const warning = messages.find(m => m.includes('effort') && m.toLowerCase().includes('codex'));
-    expect(warning).toBeDefined();
   });
 });
 

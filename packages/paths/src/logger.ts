@@ -29,6 +29,49 @@ export type { Logger } from 'pino';
 
 const VALID_LEVELS = new Set(['fatal', 'error', 'warn', 'info', 'debug', 'trace']);
 
+/**
+ * Optional hook invoked for every `.fatal(...)` call on any logger (root or
+ * child). Set by @archon/cli after Sentry init; unset otherwise. The logger
+ * itself has no knowledge of Sentry — this keeps the package-layering clean
+ * and lets tests that mock `@archon/paths` ignore the hook entirely.
+ */
+export type FatalReporter = (err: unknown, ctx: Record<string, unknown>) => void;
+
+let fatalReporter: FatalReporter | null = null;
+
+export function setErrorReporter(reporter: FatalReporter | null): void {
+  fatalReporter = reporter;
+}
+
+/**
+ * Pino log-method hook. Only inspects `fatal` (level 60) calls; all other
+ * levels are a fast-return. Invoked from within pino before the underlying
+ * log is written, so it runs on the same event-loop tick as the caller.
+ */
+function notifyFatalReporter(inputArgs: unknown[], level: number): void {
+  if (level !== 60 || !fatalReporter) return;
+  let err: unknown;
+  let ctx: Record<string, unknown> = {};
+  const first = inputArgs[0];
+  if (first && typeof first === 'object' && !Array.isArray(first)) {
+    ctx = first as Record<string, unknown>;
+    const candidate =
+      (first as Record<string, unknown>).err ?? (first as Record<string, unknown>).error;
+    if (candidate instanceof Error) err = candidate;
+  } else if (first instanceof Error) {
+    err = first;
+  }
+  if (!err) {
+    const msg = inputArgs.find((a): a is string => typeof a === 'string') ?? 'fatal log event';
+    err = new Error(msg);
+  }
+  try {
+    fatalReporter(err, ctx);
+  } catch {
+    // A broken reporter must never take down the process.
+  }
+}
+
 function getInitialLevel(): string {
   const envLevel = process.env.LOG_LEVEL?.toLowerCase();
   if (envLevel) {
@@ -60,6 +103,18 @@ function buildLogger(): Logger {
   const level = getInitialLevel();
   const usePretty = process.stdout.isTTY && process.env.NODE_ENV !== 'production';
 
+  const hooks = {
+    logMethod(
+      this: Logger,
+      inputArgs: Parameters<Logger['info']>,
+      method: Logger['info'],
+      logLevel: number
+    ): void {
+      notifyFatalReporter(inputArgs as unknown[], logLevel);
+      method.apply(this, inputArgs);
+    },
+  };
+
   if (usePretty) {
     try {
       const stream = pretty({
@@ -68,7 +123,7 @@ function buildLogger(): Logger {
         translateTime: 'SYS:standard',
         ignore: 'pid,hostname',
       });
-      return pino({ level }, stream);
+      return pino({ level, hooks }, stream);
     } catch (err) {
       // pino-pretty failed to initialize (missing peer, broken TTY descriptor,
       // or incompatible runtime). Fall back to plain JSON so logging keeps
@@ -79,7 +134,7 @@ function buildLogger(): Logger {
     }
   }
 
-  return pino({ level });
+  return pino({ level, hooks });
 }
 
 /**

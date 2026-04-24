@@ -22,12 +22,15 @@
  *   1  unexpected error (missing dir, unreadable source, invalid filename, etc.)
  *   2  --check was passed and the file would change
  */
-import { access, readFile, readdir, writeFile } from 'fs/promises';
+import { access, readFile, readdir, stat, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 
 const REPO_ROOT = resolve(import.meta.dir, '..');
 const COMMANDS_DIR = join(REPO_ROOT, '.archon/commands/defaults');
 const WORKFLOWS_DIR = join(REPO_ROOT, '.archon/workflows/defaults');
+const SKILLS_DIR = join(REPO_ROOT, '.archon/skills/defaults');
+const AGENTS_DIR = join(REPO_ROOT, '.archon/agents/defaults');
+const MODELS_YAML_PATH = join(REPO_ROOT, '.archon/models.defaults.yaml');
 const OUTPUT_PATH = join(
   REPO_ROOT,
   'packages/workflows/src/defaults/bundled-defaults.generated.ts'
@@ -49,6 +52,27 @@ async function ensureDir(dir: string, label: string): Promise<void> {
         `Run this script from the repo root (cwd was ${process.cwd()}), ` +
         'or verify the .archon/ tree exists.'
     );
+  }
+}
+
+/** True if dir exists. Skills/agents/models-yaml are all optional — if the
+ *  sync-superpowers script hasn't been run yet, or a fresh checkout doesn't
+ *  have them, emit empty records instead of hard-failing.  */
+async function dirExists(dir: string): Promise<boolean> {
+  try {
+    await access(dir);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    const s = await stat(path);
+    return s.isFile();
+  } catch {
+    return false;
   }
 }
 
@@ -91,6 +115,52 @@ async function collectFiles(dir: string, extensions: readonly string[]): Promise
   return files;
 }
 
+/**
+ * Collect skills from a directory of the shape `<root>/<skill-name>/SKILL.md`.
+ * Only the SKILL.md body is embedded (supporting files in the skill dir are
+ * kept on disk for fidelity but are not consumed by the loader). Missing root
+ * → empty list.
+ */
+async function collectSkills(dir: string): Promise<BundledFile[]> {
+  if (!(await dirExists(dir))) return [];
+  const entries = await readdir(dir, { withFileTypes: true });
+  const skillDirs = entries
+    .filter(e => e.isDirectory())
+    .map(e => e.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  const files: BundledFile[] = [];
+  for (const name of skillDirs) {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+      throw new Error(
+        `Bundled skill directory "${name}" in ${dir} is not kebab-case. ` +
+          'Skills must be lowercase letters, digits, and hyphens.'
+      );
+    }
+    const skillMd = join(dir, name, 'SKILL.md');
+    if (!(await fileExists(skillMd))) {
+      // Directory without a SKILL.md — probably supporting content (LICENSE,
+      // ATTRIBUTION.md). Silently skip; these live in the vendored tree but
+      // aren't skills.
+      continue;
+    }
+    const raw = await readFile(skillMd, 'utf-8');
+    const content = raw.replace(/\r\n/g, '\n');
+    if (!content.trim()) {
+      throw new Error(`Bundled skill "${name}" (${skillMd}) is empty.`);
+    }
+    files.push({ name, content });
+  }
+  return files;
+}
+
+/** Read optional bundled models.yaml, normalized to LF. Missing → empty string. */
+async function readOptionalText(path: string): Promise<string> {
+  if (!(await fileExists(path))) return '';
+  const raw = await readFile(path, 'utf-8');
+  return raw.replace(/\r\n/g, '\n');
+}
+
 function renderRecord(comment: string, exportName: string, files: BundledFile[]): string {
   const entries = files
     .map(f => `  ${JSON.stringify(f.name)}: ${JSON.stringify(f.content)},`)
@@ -103,7 +173,13 @@ function renderRecord(comment: string, exportName: string, files: BundledFile[])
   ].join('\n');
 }
 
-function renderFile(commands: BundledFile[], workflows: BundledFile[]): string {
+function renderFile(
+  commands: BundledFile[],
+  workflows: BundledFile[],
+  skills: BundledFile[],
+  agents: BundledFile[],
+  modelsYaml: string
+): string {
   const header = [
     '/**',
     ' * AUTO-GENERATED — DO NOT EDIT.',
@@ -114,6 +190,9 @@ function renderFile(commands: BundledFile[], workflows: BundledFile[]): string {
     ' * Source of truth:',
     ' *   .archon/commands/defaults/*.md',
     ' *   .archon/workflows/defaults/*.{yaml,yml}',
+    ' *   .archon/skills/defaults/<name>/SKILL.md',
+    ' *   .archon/agents/defaults/<name>.md',
+    ' *   .archon/models.defaults.yaml',
     ' *',
     ' * Contents are inlined as plain string literals (JSON-escaped) so this',
     ' * module loads in both Bun and Node. Previous versions used',
@@ -122,27 +201,44 @@ function renderFile(commands: BundledFile[], workflows: BundledFile[]): string {
     '',
   ].join('\n');
 
+  const modelsExport = [
+    '// Bundled default models.yaml (empty string if no defaults file is present)',
+    `export const BUNDLED_MODELS_YAML: string = ${JSON.stringify(modelsYaml)};`,
+  ].join('\n');
+
   return [
     header,
     renderRecord('Bundled default commands', 'BUNDLED_COMMANDS', commands),
     '',
     renderRecord('Bundled default workflows', 'BUNDLED_WORKFLOWS', workflows),
     '',
+    renderRecord('Bundled default skills', 'BUNDLED_SKILLS', skills),
+    '',
+    renderRecord('Bundled default agents', 'BUNDLED_AGENTS', agents),
+    '',
+    modelsExport,
+    '',
   ].join('\n');
 }
 
 async function main(): Promise<void> {
+  // Commands + workflows are required — these have always been bundled.
   await Promise.all([
     ensureDir(COMMANDS_DIR, 'Commands defaults'),
     ensureDir(WORKFLOWS_DIR, 'Workflows defaults'),
   ]);
 
-  const [commands, workflows] = await Promise.all([
+  // Skills, agents, and models.defaults.yaml are optional — if the superpowers
+  // sync hasn't been run yet they simply contribute empty maps.
+  const [commands, workflows, skills, agents, modelsYaml] = await Promise.all([
     collectFiles(COMMANDS_DIR, ['.md']),
     collectFiles(WORKFLOWS_DIR, ['.yaml', '.yml']),
+    collectSkills(SKILLS_DIR),
+    (await dirExists(AGENTS_DIR)) ? collectFiles(AGENTS_DIR, ['.md']) : Promise.resolve([]),
+    readOptionalText(MODELS_YAML_PATH),
   ]);
 
-  const contents = renderFile(commands, workflows);
+  const contents = renderFile(commands, workflows, skills, agents, modelsYaml);
 
   if (CHECK_ONLY) {
     let existing = '';
@@ -160,14 +256,14 @@ async function main(): Promise<void> {
       process.exit(2);
     }
     console.log(
-      `bundled-defaults.generated.ts is up to date (${commands.length} commands, ${workflows.length} workflows).`
+      `bundled-defaults.generated.ts is up to date (${commands.length} commands, ${workflows.length} workflows, ${skills.length} skills, ${agents.length} agents).`
     );
     return;
   }
 
   await writeFile(OUTPUT_PATH, contents, 'utf-8');
   console.log(
-    `Wrote ${OUTPUT_PATH}\n  ${commands.length} commands, ${workflows.length} workflows.`
+    `Wrote ${OUTPUT_PATH}\n  ${commands.length} commands, ${workflows.length} workflows, ${skills.length} skills, ${agents.length} agents.`
   );
 }
 

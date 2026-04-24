@@ -20,7 +20,7 @@ import {
   findMarkdownFilesRecursive,
 } from '@archon/paths';
 import { execFileAsync } from '@archon/git';
-import { BUNDLED_COMMANDS, isBinaryBuild } from './defaults/bundled-defaults';
+import { BUNDLED_COMMANDS, BUNDLED_SKILLS, isBinaryBuild } from './defaults/bundled-defaults';
 import { isValidCommandName } from './command-validation';
 import { getProviderCapabilities, isRegisteredProvider } from '@archon/providers';
 
@@ -405,22 +405,45 @@ export async function validateWorkflowResources(
       }
     }
 
-    // --- Skills nodes: check skill directories exist ---
+    // --- Skills nodes: check skill is resolvable from the Archon registry ---
+    // Check bundled defaults + Archon's .archon/skills/ + ~/.archon/skills/
+    // FIRST (that's the actual runtime path the DAG executor uses), and fall
+    // back to Claude's .claude/skills/ only if Archon doesn't know the skill.
     if ('skills' in node && Array.isArray(node.skills)) {
       for (const skillName of node.skills) {
-        const projectSkillPath = join(cwd, '.claude', 'skills', skillName, 'SKILL.md');
-        const userSkillPath = join(homedir(), '.claude', 'skills', skillName, 'SKILL.md');
+        // Archon registry (bundled + project + global)
+        const inBundled = Object.hasOwn(BUNDLED_SKILLS, skillName);
+        const archonProjectSkill = join(cwd, '.archon', 'skills', skillName, 'SKILL.md');
+        const archonGlobalSkill = join(homedir(), '.archon', 'skills', skillName, 'SKILL.md');
+        const archonProjectExists = inBundled ? true : await fileExists(archonProjectSkill);
+        const archonGlobalExists =
+          inBundled || archonProjectExists ? true : await fileExists(archonGlobalSkill);
 
-        const projectExists = await fileExists(projectSkillPath);
-        const userExists = await fileExists(userSkillPath);
+        // Claude Code fallback (legacy path — user-authored skills outside Archon)
+        const claudeProjectSkill = join(cwd, '.claude', 'skills', skillName, 'SKILL.md');
+        const claudeUserSkill = join(homedir(), '.claude', 'skills', skillName, 'SKILL.md');
+        const claudeProjectExists =
+          inBundled || archonProjectExists || archonGlobalExists
+            ? true
+            : await fileExists(claudeProjectSkill);
+        const claudeUserExists =
+          inBundled || archonProjectExists || archonGlobalExists || claudeProjectExists
+            ? true
+            : await fileExists(claudeUserSkill);
 
-        if (!projectExists && !userExists) {
+        if (
+          !inBundled &&
+          !archonProjectExists &&
+          !archonGlobalExists &&
+          !claudeProjectExists &&
+          !claudeUserExists
+        ) {
           issues.push({
             level: 'warning',
             nodeId: node.id,
             field: 'skills',
-            message: `Skill '${skillName}' not found in .claude/skills/ or ~/.claude/skills/`,
-            hint: `Install with: npx skills add <repo> — or create manually at .claude/skills/${skillName}/SKILL.md`,
+            message: `Skill '${skillName}' not found in .archon/skills/, ~/.archon/skills/, bundled defaults, or .claude/skills/`,
+            hint: `Create at .archon/skills/${skillName}/SKILL.md, or check 'archon skills list' for available skills.`,
           });
         }
       }

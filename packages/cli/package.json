@@ -8,20 +8,21 @@
   },
   "scripts": {
     "cli": "bun src/cli.ts",
-    "test": "bun test src/commands/version.test.ts src/commands/setup.test.ts && bun test src/commands/workflow.test.ts && bun test src/commands/isolation.test.ts && bun test src/commands/chat.test.ts && bun test src/commands/serve.test.ts",
+    "test": "bun test src/commands/version.test.ts src/commands/setup.test.ts src/setup/plugins/opencode.test.ts src/setup/plugins/pydantic.test.ts src/setup/plugins/litellm.test.ts src/setup/registry.test.ts src/commands/models.test.ts src/mcp/server.test.ts && bun test src/commands/workflow.test.ts && bun test src/commands/isolation.test.ts && bun test src/commands/chat.test.ts && bun test src/sentry/init.test.ts",
     "type-check": "bun x tsc --noEmit"
   },
   "dependencies": {
-    "@archon/adapters": "workspace:*",
     "@archon/core": "workspace:*",
     "@archon/git": "workspace:*",
     "@archon/isolation": "workspace:*",
     "@archon/paths": "workspace:*",
     "@archon/providers": "workspace:*",
-    "@archon/server": "workspace:*",
     "@archon/workflows": "workspace:*",
     "@clack/prompts": "^1.0.0",
-    "dotenv": "^17.2.3"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@sentry/node": "^8",
+    "dotenv": "^17.2.3",
+    "zod": "^3.25.28"
   },
   "devDependencies": {
     "@types/node": "^22.0.0"

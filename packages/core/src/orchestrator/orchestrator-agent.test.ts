@@ -44,7 +44,7 @@ const mockSendQuery = mock(async function* () {
 const mockGetCodebaseEnvVars = mock(() => Promise.resolve({}));
 const mockLoadConfig = mock(() =>
   Promise.resolve({
-    assistants: { claude: {}, codex: {} },
+    assistants: { claude: {} },
     envVars: {},
   })
 );
@@ -150,10 +150,8 @@ mock.module('../services/title-generator', () => ({
   generateAndSetTitle: mock(() => Promise.resolve()),
 }));
 
-const mockDispatchBackgroundWorkflow = mock(() => Promise.resolve());
 mock.module('./orchestrator', () => ({
   validateAndResolveIsolation: mock(() => Promise.resolve({ cwd: '/test/cwd' })),
-  dispatchBackgroundWorkflow: mockDispatchBackgroundWorkflow,
 }));
 
 mock.module('./prompt-builder', () => ({
@@ -908,7 +906,7 @@ describe('discoverAllWorkflows — remote sync', () => {
     mockGetCodebaseEnvVars.mockImplementation(() => Promise.resolve({}));
     mockLoadConfig.mockImplementation(() =>
       Promise.resolve({
-        assistants: { claude: {}, codex: {} },
+        assistants: { claude: {} },
         envVars: {},
       })
     );
@@ -998,7 +996,7 @@ describe('discoverAllWorkflows — remote sync', () => {
     mockGetCodebase.mockReturnValueOnce(Promise.resolve(codebase));
     mockGetCodebaseEnvVars.mockResolvedValueOnce({ DB_SECRET: 'db-value' });
     mockLoadConfig.mockResolvedValueOnce({
-      assistants: { claude: {}, codex: {} },
+      assistants: { claude: {} },
       envVars: { FILE_SECRET: 'file-value' },
     });
 
@@ -1029,7 +1027,7 @@ describe('discoverAllWorkflows — remote sync', () => {
     mockGetCodebase.mockReturnValueOnce(Promise.resolve(codebase));
     mockGetCodebaseEnvVars.mockRejectedValueOnce(new Error('db unavailable'));
     mockLoadConfig.mockResolvedValueOnce({
-      assistants: { claude: {}, codex: {} },
+      assistants: { claude: {} },
       envVars: { FILE_SECRET: 'file-value' },
     });
 
@@ -1078,7 +1076,6 @@ describe('workflow dispatch routing — interactive flag', () => {
 
   beforeEach(() => {
     mockExecuteWorkflow.mockClear();
-    mockDispatchBackgroundWorkflow.mockClear();
     mockHandleCommand.mockReset();
     mockHandleCommand.mockImplementation(() =>
       Promise.resolve({ success: true, message: 'ok', workflow: undefined })
@@ -1098,7 +1095,6 @@ describe('workflow dispatch routing — interactive flag', () => {
     await handleMessage(platform, 'conv-1', '/workflow run test-workflow');
 
     expect(mockExecuteWorkflow).toHaveBeenCalled();
-    expect(mockDispatchBackgroundWorkflow).not.toHaveBeenCalled();
     // Regression for the auto-resume plumbing: the interactive web dispatch
     // must pass the caller conversation's DB id as parentConversationId
     // (11th positional arg) so the approve/reject API handlers can dispatch
@@ -1137,31 +1133,15 @@ describe('workflow dispatch routing — interactive flag', () => {
     expect(callArgs[10]).toBe('conv-1');
   });
 
-  test('calls dispatchBackgroundWorkflow for non-interactive workflow on web', async () => {
+  test('calls executeWorkflow for non-interactive workflow (CLI-only, no background dispatch)', async () => {
     mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(makeDispatchConversation()));
     mockGetCodebase.mockReturnValueOnce(Promise.resolve(makeDispatchCodebase()));
     mockHandleCommand.mockReturnValueOnce(Promise.resolve(makeWorkflowResult(undefined)));
 
-    const platform = makePlatform(); // getPlatformType returns 'web'
-    await handleMessage(platform, 'conv-1', '/workflow run test-workflow');
-
-    expect(mockDispatchBackgroundWorkflow).toHaveBeenCalled();
-    expect(mockExecuteWorkflow).not.toHaveBeenCalled();
-  });
-
-  test('calls executeWorkflow for interactive workflow on non-web platform', async () => {
-    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(makeDispatchConversation()));
-    mockGetCodebase.mockReturnValueOnce(Promise.resolve(makeDispatchCodebase()));
-    mockHandleCommand.mockReturnValueOnce(Promise.resolve(makeWorkflowResult(true)));
-
-    const platform = {
-      ...makePlatform(),
-      getPlatformType: mock(() => 'slack' as const),
-    };
+    const platform = makePlatform();
     await handleMessage(platform, 'conv-1', '/workflow run test-workflow');
 
     expect(mockExecuteWorkflow).toHaveBeenCalled();
-    expect(mockDispatchBackgroundWorkflow).not.toHaveBeenCalled();
   });
 });
 
@@ -1350,7 +1330,7 @@ describe('handleWorkflowRunCommand — E2 single codebase auto-select', () => {
     mockHandleCommand.mockReset();
     mockDiscoverWorkflowsWithConfig.mockReset();
     mockUpdateConversation.mockClear();
-    mockDispatchBackgroundWorkflow.mockClear();
+    mockExecuteWorkflow.mockClear();
     mockLogger.error.mockClear();
 
     // Default: return empty conversation without codebase
@@ -1393,7 +1373,7 @@ describe('handleWorkflowRunCommand — E2 single codebase auto-select', () => {
 
     // Should auto-select the codebase and update conversation
     expect(mockUpdateConversation).toHaveBeenCalledWith('conv-1', { codebase_id: codebase.id });
-    expect(mockDispatchBackgroundWorkflow).toHaveBeenCalled();
+    expect(mockExecuteWorkflow).toHaveBeenCalled();
   });
 
   test('resolves workflow by case-insensitive name when exact match fails', async () => {
@@ -1422,7 +1402,7 @@ describe('handleWorkflowRunCommand — E2 single codebase auto-select', () => {
     await handleMessage(platform, 'conv-1', '/workflow run Assist test');
 
     expect(mockUpdateConversation).toHaveBeenCalledWith('conv-1', { codebase_id: codebase.id });
-    expect(mockDispatchBackgroundWorkflow).toHaveBeenCalled();
+    expect(mockExecuteWorkflow).toHaveBeenCalled();
   });
 
   test('sends error message when workflow not found in discovery', async () => {
@@ -1452,7 +1432,7 @@ describe('handleWorkflowRunCommand — E2 single codebase auto-select', () => {
       'conv-1',
       expect.stringContaining('not found')
     );
-    expect(mockDispatchBackgroundWorkflow).not.toHaveBeenCalled();
+    expect(mockExecuteWorkflow).not.toHaveBeenCalled();
   });
 
   test('sends error when discovery fails', async () => {
@@ -1477,7 +1457,7 @@ describe('handleWorkflowRunCommand — E2 single codebase auto-select', () => {
       'conv-1',
       expect.stringContaining('Failed to load workflows')
     );
-    expect(mockDispatchBackgroundWorkflow).not.toHaveBeenCalled();
+    expect(mockExecuteWorkflow).not.toHaveBeenCalled();
   });
 });
 
@@ -1491,7 +1471,6 @@ describe('discoverAllWorkflows — merge repo workflows over global', () => {
     mockGetCodebase.mockReset();
     mockListCodebases.mockReset();
     mockDiscoverWorkflowsWithConfig.mockReset();
-    mockDispatchBackgroundWorkflow.mockClear();
     mockLogger.warn.mockClear();
 
     mockGetOrCreateConversation.mockImplementation(() => Promise.resolve(null));

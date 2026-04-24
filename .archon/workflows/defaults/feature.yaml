@@ -1,0 +1,126 @@
+name: feature
+description: |
+  Use when: Building a new feature end-to-end with the bundled superpowers skills library.
+  Input: One-line feature description (passed as $ARGUMENTS).
+  Output: PR ready for review with plan + review notes attached.
+
+  Chain: brainstorm (clarify) -> plan (write to artifacts) -> [human approval]
+         -> implement (TDD loop) -> review (code-reviewer agent)
+         -> finish (PR + worktree cleanup).
+
+  Models come from models.yaml (haiku for cheap cleanup, sonnet for
+  implementation, opus for planning + review). Override per-skill with
+  `archon models set skill <name> <model>`.
+
+  NOT for: Executing an existing plan (use archon-plan-to-pr), quick fixes
+  (use archon-assist), or standalone reviews.
+
+nodes:
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 1: BRAINSTORM
+  # Clarify scope and write a spec to artifacts.
+  # ═══════════════════════════════════════════════════════════════════
+
+  - id: brainstorm
+    prompt: |
+      Feature request: $ARGUMENTS
+
+      Use the brainstorming skill to clarify scope before any planning or
+      code. Ask the user targeted questions about user-visible behavior,
+      constraints, and edge cases. When you have enough to proceed, write
+      the agreed spec to $ARTIFACTS_DIR/spec.md.
+    skills: [brainstorming]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 2: PLAN
+  # Turn the spec into a detailed implementation plan.
+  # ═══════════════════════════════════════════════════════════════════
+
+  - id: plan
+    prompt: |
+      Read $ARTIFACTS_DIR/spec.md and use the writing-plans skill to produce
+      a detailed implementation plan at $ARTIFACTS_DIR/plan.md. Include:
+      - exact file paths to modify or create
+      - test strategy for each change (TDD — red tests first)
+      - risks, rollback path, out-of-scope notes
+
+      The plan should be concrete enough that a separate agent could execute
+      it without further clarification.
+    skills: [writing-plans]
+    depends_on: [brainstorm]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 3: HUMAN APPROVAL
+  # Gate execution on human review of the plan.
+  # ═══════════════════════════════════════════════════════════════════
+
+  - id: approval-gate
+    approval:
+      message: |
+        Review $ARTIFACTS_DIR/plan.md. Approve to start implementation, or
+        reject with notes to revise. Notes become input to the implement
+        phase verbatim.
+      capture_response: true
+    depends_on: [plan]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 4: IMPLEMENT
+  # Execute the plan under TDD. The approval-gate output (if any) is
+  # substituted into the prompt so the agent can incorporate human notes.
+  # ═══════════════════════════════════════════════════════════════════
+
+  - id: implement
+    prompt: |
+      Execute the plan at $ARTIFACTS_DIR/plan.md strictly, using TDD — write
+      a failing test first, then the minimum code to make it pass, then
+      refactor.
+
+      Human feedback from the approval gate (may be empty):
+      ---
+      $approval-gate.output
+      ---
+
+      Run the repo's validation commands after each logical change. Do not
+      merge steps; keep commits atomic.
+    skills: [executing-plans, test-driven-development]
+    depends_on: [approval-gate]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 5: REVIEW
+  # Let the bundled code-reviewer agent audit the diff against the plan.
+  # ═══════════════════════════════════════════════════════════════════
+
+  - id: review
+    prompt: |
+      Review the diff since the feature branch's base against the plan at
+      $ARTIFACTS_DIR/plan.md. Flag:
+      - deviations from the plan (added scope, skipped tasks)
+      - missing or shallow tests
+      - code that does not match repo conventions
+
+      Write the review to $ARTIFACTS_DIR/review.md.
+    agents:
+      code-reviewer:
+        description: Superpowers code reviewer (bundled)
+        prompt: |
+          You are the code-reviewer sub-agent. Read $ARTIFACTS_DIR/plan.md
+          for scope context. Produce a structured review, not a vibe check.
+    depends_on: [implement]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 6: FINISH
+  # Create the PR with plan + review attached; clean the worktree.
+  # ═══════════════════════════════════════════════════════════════════
+
+  - id: finish
+    prompt: |
+      Open a pull request for this branch using `gh pr create`. Body:
+      - a two-sentence summary
+      - a "Plan" section linking to or quoting $ARTIFACTS_DIR/plan.md
+      - a "Review notes" section linking to or quoting
+        $ARTIFACTS_DIR/review.md
+      - a test plan (what was verified, what still needs manual checking)
+
+      Then clean the worktree per the finishing-a-development-branch skill.
+    skills: [finishing-a-development-branch]
+    depends_on: [review]

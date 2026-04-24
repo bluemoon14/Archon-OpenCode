@@ -2,7 +2,7 @@
  * Tool Call Formatter
  *
  * Formats tool calls from AI assistants into user-friendly messages
- * Based on claude-telegram-bot (lines 572-604) and codex-telegram-bot patterns
+ * Based on claude-telegram-bot patterns
  */
 
 /**

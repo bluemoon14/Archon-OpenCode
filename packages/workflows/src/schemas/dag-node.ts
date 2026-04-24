@@ -37,7 +37,7 @@ export const TRIGGER_RULES: readonly TriggerRule[] = triggerRuleSchema.options;
 // Claude SDK option schemas
 // ---------------------------------------------------------------------------
 
-/** Claude Agent SDK effort level — controls reasoning depth. Different from Codex modelReasoningEffort. */
+/** Claude Agent SDK effort level — controls reasoning depth. */
 export const effortLevelSchema = z.enum(['low', 'medium', 'high', 'max']);
 
 export type EffortLevel = z.infer<typeof effortLevelSchema>;
@@ -137,6 +137,9 @@ export const dagNodeBaseSchema = z.object({
   trigger_rule: triggerRuleSchema.optional(),
   model: z.string().optional(),
   provider: z.string().trim().min(1).optional(),
+  /** Named provider-scoped selector. Today only Pydantic AI uses it: the
+   *  value names a pre-configured agent under `assistants.pydantic.agents`. */
+  agent: z.string().trim().min(1).optional(),
   context: z.enum(['fresh', 'shared']).optional(),
   output_format: z.record(z.unknown()).optional(),
   allowed_tools: z.array(z.string()).optional(),
@@ -325,6 +328,7 @@ export type DagNode =
 export const BASH_NODE_AI_FIELDS: readonly string[] = [
   'provider',
   'model',
+  'agent',
   'context',
   'output_format',
   'allowed_tools',
@@ -523,6 +527,22 @@ export const dagNodeSchema = dagNodeBaseSchema
       });
     }
 
+    // Pydantic agent selection: `agent:` is only meaningful when the active
+    // provider is pydantic. The workflow-level provider is not visible here,
+    // so the check only fires when the NODE explicitly sets a non-pydantic
+    // provider — a belt-and-braces user-input mistake. Workflow-level
+    // `provider: pydantic` with `agent:` on nodes (and no per-node provider)
+    // validates fine; mismatches where the active provider isn't pydantic
+    // surface at runtime with "Agent X not configured" from the Pydantic
+    // provider.
+    if (data.agent !== undefined && data.provider !== undefined && data.provider !== 'pydantic') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `'agent' is only valid when provider is 'pydantic' (got '${data.provider}')`,
+        path: ['agent'],
+      });
+    }
+
     // Provider/model compatibility (AI nodes only)
     if (!hasBash && !hasLoop && !hasScript && data.provider && data.model) {
       try {
@@ -564,6 +584,7 @@ export const dagNodeSchema = dagNodeBaseSchema
     const aiOnly = {
       ...(data.model !== undefined ? { model: data.model } : {}),
       ...(data.provider !== undefined ? { provider: data.provider } : {}),
+      ...(data.agent !== undefined ? { agent: data.agent } : {}),
       ...(data.context !== undefined ? { context: data.context } : {}),
       ...(data.output_format !== undefined ? { output_format: data.output_format } : {}),
       ...(data.allowed_tools !== undefined ? { allowed_tools: data.allowed_tools } : {}),

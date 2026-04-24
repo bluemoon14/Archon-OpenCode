@@ -9,6 +9,7 @@ import { readFile } from 'fs/promises';
 import { isAbsolute, resolve as resolvePath } from 'path';
 import { execFileAsync } from '@archon/git';
 import { discoverScriptsForCwd } from './script-discovery';
+import { resolveNodeContent } from './resolve-node-content';
 import type {
   IWorkflowPlatform,
   WorkflowMessageMetadata,
@@ -439,6 +440,7 @@ async function resolveNodeProviderAndModel(
     hooks: node.hooks,
     skills: node.skills,
     agents: node.agents,
+    agent: node.agent,
     allowed_tools: node.allowed_tools,
     denied_tools: node.denied_tools,
     effort: node.effort ?? workflowLevelOptions.effort,
@@ -461,6 +463,44 @@ async function resolveNodeProviderAndModel(
   };
 
   return { provider, model, options };
+}
+
+/**
+ * Augment `SendQueryOptions` with `resolvedSkills` / `resolvedAgents` arrays
+ * pre-loaded from the SkillAgentRegistry. When the registry is absent (or the
+ * node references no skills/agents), returns the input unchanged so the
+ * provider continues to receive raw `nodeConfig.skills`/`agents` and can fall
+ * back to SDK-native lookup (e.g. Claude SDK's `settingSources` path).
+ *
+ * Skills/agents not present in the registry are silently dropped from the
+ * resolved arrays — the provider still sees them in `nodeConfig` and can
+ * pass them through unchanged.
+ */
+async function augmentOptionsWithRegistryContent(
+  deps: WorkflowDeps,
+  options: SendQueryOptions | undefined
+): Promise<SendQueryOptions | undefined> {
+  if (options === undefined) return options;
+  if (deps.skillAgentRegistry === undefined) return options;
+  const { skills, agents } = options.nodeConfig ?? {};
+  if ((skills === undefined || skills.length === 0) && agents === undefined) return options;
+
+  const resolved = await resolveNodeContent({
+    skills,
+    agents,
+    nodeModel: options.model,
+    defaultAssistantModel: options.model ?? 'sonnet',
+    registry: deps.skillAgentRegistry,
+  });
+
+  if (resolved.resolvedSkills.length === 0 && resolved.resolvedAgents.length === 0) {
+    return options;
+  }
+
+  const augmented: SendQueryOptions = { ...options };
+  if (resolved.resolvedSkills.length > 0) augmented.resolvedSkills = resolved.resolvedSkills;
+  if (resolved.resolvedAgents.length > 0) augmented.resolvedAgents = resolved.resolvedAgents;
+  return augmented;
 }
 
 /** Evaluate trigger rule for a node given its upstream states */
@@ -2257,7 +2297,7 @@ async function executeApprovalNode(
       ...(node.idle_timeout ? { idle_timeout: node.idle_timeout } : {}),
     };
 
-    const { provider, options: nodeOptions } = await resolveNodeProviderAndModel(
+    const { provider, options: nodeOptionsRaw } = await resolveNodeProviderAndModel(
       syntheticNode,
       workflowProvider,
       workflowModel,
@@ -2268,6 +2308,7 @@ async function executeApprovalNode(
       cwd,
       workflowLevelOptions
     );
+    const nodeOptions = await augmentOptionsWithRegistryContent(deps, nodeOptionsRaw);
 
     const output = await executeNodeInternal(
       deps,
@@ -2703,7 +2744,7 @@ export async function executeDagWorkflow(
           }
 
           // 4. Resolve per-node provider/model/options
-          const { provider, options: nodeOptions } = await resolveNodeProviderAndModel(
+          const { provider, options: nodeOptionsRaw } = await resolveNodeProviderAndModel(
             node,
             workflowProvider,
             workflowModel,
@@ -2714,6 +2755,10 @@ export async function executeDagWorkflow(
             cwd,
             workflowLevelOptions
           );
+          // 4a. Load Archon-registry skills/agents into resolvedSkills/resolvedAgents
+          //     so non-Claude runtimes (and Claude without settingSources) get
+          //     the content portably. See `resolve-node-content.ts`.
+          const nodeOptions = await augmentOptionsWithRegistryContent(deps, nodeOptionsRaw);
 
           // 5. Determine session — parallel or context:fresh → always fresh
           // Parallel layers always get fresh sessions; explicit 'fresh' context also forces it.

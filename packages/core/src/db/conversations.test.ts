@@ -94,14 +94,14 @@ describe('conversations', () => {
       const newConversation: Conversation = {
         ...existingConversation,
         id: 'conv-new',
-        ai_assistant_type: 'codex',
+        ai_assistant_type: 'claude',
         codebase_id: 'codebase-123',
       };
 
       // First query returns empty (no existing)
       mockQuery.mockResolvedValueOnce(createQueryResult([]));
       // Second query fetches codebase
-      mockQuery.mockResolvedValueOnce(createQueryResult([{ ai_assistant_type: 'codex' }]));
+      mockQuery.mockResolvedValueOnce(createQueryResult([{ ai_assistant_type: 'claude' }]));
       // Third query creates new
       mockQuery.mockResolvedValueOnce(createQueryResult([newConversation]));
 
@@ -117,18 +117,18 @@ describe('conversations', () => {
       expect(mockQuery).toHaveBeenNthCalledWith(
         3,
         'INSERT INTO remote_agent_conversations (platform_type, platform_conversation_id, ai_assistant_type, codebase_id, cwd) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-        ['telegram', 'chat-789', 'codex', 'codebase-123', null]
+        ['telegram', 'chat-789', 'claude', 'codebase-123', null]
       );
     });
 
     test('uses DEFAULT_AI_ASSISTANT env var when set', async () => {
       // Set env var for this test (afterEach will restore original)
-      process.env.DEFAULT_AI_ASSISTANT = 'codex';
+      process.env.DEFAULT_AI_ASSISTANT = 'claude';
 
       const newConversation: Conversation = {
         ...existingConversation,
         id: 'conv-new',
-        ai_assistant_type: 'codex',
+        ai_assistant_type: 'claude',
       };
 
       mockQuery.mockResolvedValueOnce(createQueryResult([]));
@@ -140,7 +140,7 @@ describe('conversations', () => {
       expect(mockQuery).toHaveBeenNthCalledWith(
         2,
         'INSERT INTO remote_agent_conversations (platform_type, platform_conversation_id, ai_assistant_type, codebase_id, cwd) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-        ['telegram', 'chat-789', 'codex', null, null]
+        ['telegram', 'chat-789', 'claude', null, null]
       );
     });
 
@@ -174,7 +174,7 @@ describe('conversations', () => {
         platform_conversation_id: 'parent-channel',
         codebase_id: 'codebase-123',
         cwd: '/workspace/project',
-        ai_assistant_type: 'codex',
+        ai_assistant_type: 'claude',
       };
       const newConversation: Conversation = {
         ...existingConversation,
@@ -182,7 +182,7 @@ describe('conversations', () => {
         platform_conversation_id: 'thread-123',
         codebase_id: 'codebase-123',
         cwd: '/workspace/project',
-        ai_assistant_type: 'codex',
+        ai_assistant_type: 'claude',
       };
 
       // First query returns empty (no existing thread conversation)
@@ -211,7 +211,7 @@ describe('conversations', () => {
       expect(mockQuery).toHaveBeenNthCalledWith(
         3,
         'INSERT INTO remote_agent_conversations (platform_type, platform_conversation_id, ai_assistant_type, codebase_id, cwd) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-        ['discord', 'thread-123', 'codex', 'codebase-123', '/workspace/project']
+        ['discord', 'thread-123', 'claude', 'codebase-123', '/workspace/project']
       );
     });
 

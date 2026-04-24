@@ -41,7 +41,6 @@ import {
   isRegisteredProvider,
   getRegisteredProviders,
   registerBuiltinProviders,
-  registerCommunityProviders,
 } from '@archon/providers';
 
 /**
@@ -95,10 +94,6 @@ function mergeAssistantDefaults(
  */
 const SAFE_ASSISTANT_FIELDS: Record<string, readonly string[]> = {
   claude: ['model'],
-  codex: ['model', 'modelReasoningEffort', 'webSearchMode'],
-  // community providers — list each field we're confident is safe to
-  // show in the web UI. Unknown providers fall through with no fields.
-  pi: ['model'],
 };
 
 function toSafeAssistantDefaults(assistants: AssistantDefaults): SafeConfig['assistants'] {
@@ -148,25 +143,18 @@ const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
 # Bot display name (shown in messages)
 # botName: Archon
 
-# Default AI assistant (must match a registered provider, e.g. claude, codex)
+# Default AI assistant ('claude' | 'opencode' | 'pydantic')
 # defaultAssistant: claude
 
 # Assistant defaults
 # assistants:
 #   claude:
 #     model: sonnet
-#   codex:
-#     model: gpt-5.3-codex
-#     modelReasoningEffort: medium
-#     webSearchMode: disabled
-#     additionalDirectories:
-#       - /absolute/path/to/other/repo
-
-# Streaming mode per platform (stream or batch)
-# streaming:
-#   telegram: stream
-#   discord: batch
-#   slack: batch
+#   opencode:
+#     model: opencode/gpt-4o-mini
+#   pydantic:
+#     agents:
+#       smoke: { entry: .archon/agents/smoke.py }
 
 # Concurrency settings
 # concurrency:
@@ -261,29 +249,20 @@ export async function loadRepoConfig(repoPath: string): Promise<RepoConfig> {
  * Get default configuration
  */
 function getDefaults(): MergedConfig {
-  // Seed one empty entry per registered provider — built-in OR community.
-  // No per-provider listing here: adding a new provider must not require
-  // editing this function. `registerBuiltinProviders()` + any community
-  // registrations run at process bootstrap (see `packages/providers/src/
-  // registry.ts#registerCommunityProviders`), so by the time this runs the
-  // registry is populated.
+  // Seed one empty entry per registered provider. No per-provider listing here:
+  // adding a new provider must not require editing this function. Cast is safe
+  // because `registerBuiltinProviders()` runs before `loadConfig()` at every
+  // entrypoint, so the loop below populates every built-in slot.
   const providers = getRegisteredProviders();
-  const registeredAssistants: AssistantDefaults = { claude: {}, codex: {} };
+  const registeredAssistants = {} as AssistantDefaults;
   for (const provider of providers) {
-    if (!(provider.id in registeredAssistants)) {
-      registeredAssistants[provider.id] = {};
-    }
+    registeredAssistants[provider.id] = {};
   }
 
   return {
     botName: 'Archon',
     assistant: providers.find(p => p.builtIn)?.id ?? 'claude',
     assistants: registeredAssistants,
-    streaming: {
-      telegram: 'stream',
-      discord: 'batch',
-      slack: 'batch',
-    },
     paths: {
       workspaces: getArchonWorkspacesPath(),
       worktrees: getArchonWorktreesPath(),
@@ -324,23 +303,6 @@ function applyEnvOverrides(config: MergedConfig): MergedConfig {
           `Available providers: ${getRegisteredProviderNames().join(', ')}`
       );
     }
-  }
-
-  // Streaming overrides
-  const streamingModes = ['stream', 'batch'] as const;
-  const telegramMode = process.env.TELEGRAM_STREAMING_MODE;
-  if (telegramMode && streamingModes.includes(telegramMode as 'stream' | 'batch')) {
-    config.streaming.telegram = telegramMode as 'stream' | 'batch';
-  }
-
-  const discordMode = process.env.DISCORD_STREAMING_MODE;
-  if (discordMode && streamingModes.includes(discordMode as 'stream' | 'batch')) {
-    config.streaming.discord = discordMode as 'stream' | 'batch';
-  }
-
-  const slackMode = process.env.SLACK_STREAMING_MODE;
-  if (slackMode && streamingModes.includes(slackMode as 'stream' | 'batch')) {
-    config.streaming.slack = slackMode as 'stream' | 'batch';
   }
 
   // Path overrides (these come from archon-paths.ts which already checks env vars)
@@ -385,13 +347,6 @@ function mergeGlobalConfig(defaults: MergedConfig, global: GlobalConfig): Merged
   }
 
   result.assistants = mergeAssistantDefaults(result.assistants, global.assistants);
-
-  // Streaming preferences
-  if (global.streaming) {
-    if (global.streaming.telegram) result.streaming.telegram = global.streaming.telegram;
-    if (global.streaming.discord) result.streaming.discord = global.streaming.discord;
-    if (global.streaming.slack) result.streaming.slack = global.streaming.slack;
-  }
 
   // Path preferences
   if (global.paths) {
@@ -481,7 +436,6 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
  */
 export async function loadConfig(repoPath?: string): Promise<MergedConfig> {
   registerBuiltinProviders();
-  registerCommunityProviders();
 
   // 1. Start with defaults
   let config = getDefaults();
@@ -516,7 +470,6 @@ export function logConfig(config: MergedConfig): void {
   getLog().info(
     {
       assistant: config.assistant,
-      streaming: config.streaming,
     },
     'config_loaded'
   );
@@ -545,10 +498,6 @@ export async function updateGlobalConfig(updates: Partial<GlobalConfig>): Promis
         mergeAssistantDefaults(getDefaults().assistants, current.assistants),
         updates.assistants
       );
-    }
-
-    if (updates.streaming) {
-      merged.streaming = { ...current.streaming, ...updates.streaming };
     }
 
     if (updates.concurrency) {
@@ -586,11 +535,6 @@ export function toSafeConfig(config: MergedConfig): SafeConfig {
     botName: config.botName,
     assistant: config.assistant,
     assistants: toSafeAssistantDefaults(config.assistants),
-    streaming: {
-      telegram: config.streaming.telegram,
-      discord: config.streaming.discord,
-      slack: config.streaming.slack,
-    },
     concurrency: { maxConversations: config.concurrency.maxConversations },
     defaults: {
       copyDefaults: config.defaults.copyDefaults,
