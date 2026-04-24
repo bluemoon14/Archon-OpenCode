@@ -60,6 +60,9 @@ import { continueCommand } from './commands/continue';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
 import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
+import { skillsListCommand, skillsShowCommand } from './commands/skills';
+import { agentsListCommand, agentsShowCommand } from './commands/agents';
+import { modelsListCommand } from './commands/models';
 import { closeDatabase, loadGlobalConfig } from '@archon/core';
 import {
   setLogLevel,
@@ -102,6 +105,11 @@ Commands:
   complete <branch> [...]    Complete branch lifecycle (remove worktree + branches)
   validate workflows [name]  Validate workflow definitions and their references
   validate commands [name]   Validate command files
+  skills list                List every skill (bundled + global + project)
+  skills show <name>         Show a skill's SKILL.md body + resolved model
+  agents list                List every agent (bundled + global + project)
+  agents show <name>         Show an agent's body + resolved model
+  models list                Show the full skill/agent model-assignment table
   version                    Show version info
   help                       Show this help message
 
@@ -593,6 +601,55 @@ async function main(): Promise<number> {
         await isolationCompleteCommand(branches, { force: forceFlag, deleteRemote: true });
         break;
       }
+
+      case 'skills':
+        switch (subcommand) {
+          case 'list':
+            return await skillsListCommand({ cwd: effectiveCwd, json: jsonFlag });
+          case 'show': {
+            const name = positionals[2];
+            if (name === undefined || name.length === 0) {
+              console.error('Usage: archon skills show <name>');
+              return 1;
+            }
+            return await skillsShowCommand({ cwd: effectiveCwd, name, json: jsonFlag });
+          }
+          default:
+            if (subcommand === undefined) console.error('Missing skills subcommand');
+            else console.error(`Unknown skills subcommand: ${subcommand}`);
+            console.error('Available: list, show');
+            return 1;
+        }
+
+      case 'agents':
+        switch (subcommand) {
+          case 'list':
+            return await agentsListCommand({ cwd: effectiveCwd, json: jsonFlag });
+          case 'show': {
+            const name = positionals[2];
+            if (name === undefined || name.length === 0) {
+              console.error('Usage: archon agents show <name>');
+              return 1;
+            }
+            return await agentsShowCommand({ cwd: effectiveCwd, name, json: jsonFlag });
+          }
+          default:
+            if (subcommand === undefined) console.error('Missing agents subcommand');
+            else console.error(`Unknown agents subcommand: ${subcommand}`);
+            console.error('Available: list, show');
+            return 1;
+        }
+
+      case 'models':
+        switch (subcommand) {
+          case 'list':
+            return await modelsListCommand({ cwd: effectiveCwd, json: jsonFlag });
+          default:
+            if (subcommand === undefined) console.error('Missing models subcommand');
+            else console.error(`Unknown models subcommand: ${subcommand}`);
+            console.error('Available: list');
+            return 1;
+        }
 
       case 'continue': {
         const continueBranch = positionals[1];
