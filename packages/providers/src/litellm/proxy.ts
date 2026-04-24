@@ -13,6 +13,7 @@
  * we assume the `litellm` CLI is on PATH.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { statSync } from 'node:fs';
 import { createLogger } from '@archon/paths';
 import { ProviderError } from '../errors';
 
@@ -46,7 +47,13 @@ export interface StartProxyOptions {
 
 // Module-level singleton — reused across sendQuery calls within one Archon process.
 let cachedHandle: ProxyHandle | undefined;
-let cachedSpec: { configPath: string; port: number } | undefined;
+/**
+ * Spec of the currently cached proxy. `mtimeMs` is the config file's mtime
+ * captured at spawn time; `getOrStartProxy` compares against a fresh stat()
+ * each call and respawns if the user edited the config. `-1` means we
+ * couldn't stat the file (e.g. external proxies where `configPath` is synthetic).
+ */
+let cachedSpec: { configPath: string; port: number; mtimeMs: number } | undefined;
 let teardownRegistered = false;
 /**
  * In-flight spawn promise. Serializes concurrent `getOrStartProxy` callers
@@ -81,12 +88,33 @@ export async function getOrStartProxy(
     return { baseUrl: opts.baseUrl, close: () => undefined, external: true };
   }
 
+  // Stat the config file so we can detect edits between calls. Missing /
+  // unreadable file → mtime sentinel (-1); spawn will fail downstream and
+  // surface the real error rather than us returning a stale handle.
+  const currentMtime = statConfigMtime(opts.configPath);
+
   if (
     cachedHandle !== undefined &&
     cachedSpec?.configPath === opts.configPath &&
-    cachedSpec.port === opts.port
+    cachedSpec.port === opts.port &&
+    cachedSpec.mtimeMs === currentMtime
   ) {
     return cachedHandle;
+  }
+  if (
+    cachedHandle !== undefined &&
+    cachedSpec?.configPath === opts.configPath &&
+    cachedSpec.port === opts.port &&
+    cachedSpec.mtimeMs !== currentMtime
+  ) {
+    getLog().info(
+      {
+        configPath: opts.configPath,
+        previousMtime: cachedSpec.mtimeMs,
+        currentMtime,
+      },
+      'litellm.proxy_config_change_detected'
+    );
   }
 
   // Another caller is already spawning. Join that in-flight promise instead
@@ -116,9 +144,24 @@ export async function getOrStartProxy(
   });
   const handle = await pendingSpawn;
   cachedHandle = handle;
-  cachedSpec = { configPath: opts.configPath, port: opts.port };
+  cachedSpec = { configPath: opts.configPath, port: opts.port, mtimeMs: currentMtime };
   registerTeardownOnce();
   return handle;
+}
+
+/**
+ * Best-effort config-file mtime lookup. Returns a sentinel (-1) when the
+ * file can't be stat'd — the caller treats that as "don't trust the
+ * cache, respawn." stat failures shouldn't throw here because this runs
+ * on every query; any permissions / not-found problem is better surfaced
+ * by the spawn attempt that follows.
+ */
+function statConfigMtime(configPath: string): number {
+  try {
+    return statSync(configPath).mtimeMs;
+  } catch {
+    return -1;
+  }
 }
 
 async function realSpawnProxy(opts: StartProxyOptions): Promise<ProxyHandle> {

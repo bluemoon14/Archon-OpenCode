@@ -8,7 +8,7 @@
   },
   "scripts": {
     "cli": "bun src/cli.ts",
-    "test": "bun test src/commands/version.test.ts src/commands/setup.test.ts src/setup/plugins/opencode.test.ts src/setup/plugins/pydantic.test.ts src/setup/plugins/litellm.test.ts src/setup/registry.test.ts src/commands/models.test.ts src/commands/models.diff.test.ts src/commands/skills.create.test.ts src/commands/doctor.test.ts src/mcp/server.test.ts && bun test src/commands/workflow.test.ts && bun test src/commands/isolation.test.ts && bun test src/commands/chat.test.ts && bun test src/sentry/init.test.ts",
+    "test": "bun test src/commands/version.test.ts src/commands/setup.test.ts src/setup/plugins/opencode.test.ts src/setup/plugins/pydantic.test.ts src/setup/plugins/litellm.test.ts src/setup/registry.test.ts src/commands/models.test.ts src/commands/models.diff.test.ts src/commands/skills.create.test.ts src/commands/doctor.test.ts src/mcp/server.test.ts src/mcp/tools/assign.test.ts src/mcp/tools/plan.test.ts && bun test src/commands/workflow.test.ts && bun test src/commands/isolation.test.ts && bun test src/commands/chat.test.ts && bun test src/sentry/init.test.ts",
     "type-check": "bun x tsc --noEmit"
   },
   "dependencies": {
