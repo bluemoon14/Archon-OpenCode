@@ -22,6 +22,20 @@ function getLog(): ReturnType<typeof createLogger> {
 /** Bundled agents map — keyed by agent name (filename without `.md`). */
 export type BundledAgents = Record<string, string>;
 
+/**
+ * Thrown by `loadAgent` when the named agent is absent from every source.
+ * Callers that want to skip-silently (e.g. the DAG resolver falling back to
+ * raw pass-through) should catch this narrow type and let any other error
+ * bubble. See `SkillNotFoundError` in the sibling skills loader for the
+ * same pattern.
+ */
+export class AgentNotFoundError extends Error {
+  constructor(public readonly name: string) {
+    super(`Agent '${name}' not found in any source (project, global, bundled).`);
+    this.name = 'AgentNotFoundError';
+  }
+}
+
 export interface AgentLoaderSources {
   bundled?: BundledAgents;
   globalDir?: string;
@@ -41,7 +55,7 @@ export async function loadAgent(name: string, sources: AgentLoaderSources): Prom
     return parseAgentContent(name, sources.bundled[name], 'bundled', undefined);
   }
 
-  throw new Error(`Agent '${name}' not found in any source (project, global, bundled).`);
+  throw new AgentNotFoundError(name);
 }
 
 export async function listAgents(

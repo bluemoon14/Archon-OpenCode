@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { ResolvedAgent, ResolvedSkill } from './schemas';
 import type { SkillAgentRegistry } from './deps';
 import { resolveNodeContent } from './resolve-node-content';
+import { SkillNotFoundError } from './skills/loader';
+import { AgentNotFoundError } from './agents/loader';
 
 /**
  * Build a stub SkillAgentRegistry over in-memory fixtures. Skill/agent names
@@ -17,7 +19,7 @@ function makeRegistry(params: {
   return {
     loadSkill: async name => {
       const s = skills[name];
-      if (s === undefined) throw new Error(`Skill '${name}' not found in any source`);
+      if (s === undefined) throw new SkillNotFoundError(name);
       return {
         name,
         description: s.description ?? `desc for ${name}`,
@@ -30,7 +32,7 @@ function makeRegistry(params: {
     listSkills: async () => Object.keys(skills).map(name => ({ name, source: 'bundled' as const })),
     loadAgent: async name => {
       const a = agents[name];
-      if (a === undefined) throw new Error(`Agent '${name}' not found in any source`);
+      if (a === undefined) throw new AgentNotFoundError(name);
       return {
         name,
         description: a.description ?? `desc for ${name}`,
@@ -170,5 +172,49 @@ describe('resolveNodeContent', () => {
       defaultAssistantModel: 'sonnet',
     });
     expect(out.resolvedSkills[0].model).toBe('opus');
+  });
+});
+
+describe('resolveNodeContent — error bubble semantics', () => {
+  test('bubbles non-NotFound errors from loadSkill (e.g. malformed frontmatter)', async () => {
+    const registry: SkillAgentRegistry = {
+      loadSkill: async () => {
+        throw new Error('skill file has malformed YAML frontmatter');
+      },
+      listSkills: async () => [],
+      loadAgent: async () => {
+        throw new AgentNotFoundError('unused');
+      },
+      listAgents: async () => [],
+      modelsFiles: () => ({ bundled: { version: 1 } }),
+    };
+    await expect(
+      resolveNodeContent({
+        skills: ['corrupted'],
+        registry,
+        defaultAssistantModel: 'sonnet',
+      })
+    ).rejects.toThrow(/malformed YAML/);
+  });
+
+  test('bubbles non-NotFound errors from loadAgent (e.g. permission denied)', async () => {
+    const registry: SkillAgentRegistry = {
+      loadSkill: async () => {
+        throw new SkillNotFoundError('unused');
+      },
+      listSkills: async () => [],
+      loadAgent: async () => {
+        throw new Error('EACCES: permission denied reading agent file');
+      },
+      listAgents: async () => [],
+      modelsFiles: () => ({ bundled: { version: 1 } }),
+    };
+    await expect(
+      resolveNodeContent({
+        agents: { corrupted: { description: 'd', prompt: 'p' } },
+        registry,
+        defaultAssistantModel: 'sonnet',
+      })
+    ).rejects.toThrow(/EACCES/);
   });
 });

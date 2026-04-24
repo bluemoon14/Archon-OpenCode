@@ -17,6 +17,8 @@ import type {
 } from '@archon/providers/types';
 import { resolveAgentModel, resolveSkillModel } from './model-resolution';
 import type { SkillAgentRegistry } from './deps';
+import { SkillNotFoundError } from './skills/loader';
+import { AgentNotFoundError } from './agents/loader';
 
 let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
@@ -78,11 +80,14 @@ export async function resolveNodeContent(
           'skills.resolved'
         );
       } catch (err) {
-        // Skill not in registry — provider falls back to nodeConfig.skills pass-through.
-        getLog().debug(
-          { skill: name, error: err instanceof Error ? err.message : String(err) },
-          'skills.not_in_registry'
-        );
+        if (err instanceof SkillNotFoundError) {
+          // Skill not in registry — provider falls back to nodeConfig.skills pass-through.
+          getLog().debug({ skill: name }, 'skills.not_in_registry');
+          continue;
+        }
+        // Any other error (malformed frontmatter, permission denied, etc.)
+        // must surface — swallowing these masks real bugs.
+        throw err;
       }
     }
   }
@@ -124,12 +129,14 @@ export async function resolveNodeContent(
           'agents.resolved'
         );
       } catch (err) {
-        // Not in registry — agent is a pure user-inline definition. Leave it
-        // on nodeConfig.agents for the provider to pass through unchanged.
-        getLog().debug(
-          { agent: id, error: err instanceof Error ? err.message : String(err) },
-          'agents.not_in_registry'
-        );
+        if (err instanceof AgentNotFoundError) {
+          // Not in registry — agent is a pure user-inline definition. Leave it
+          // on nodeConfig.agents for the provider to pass through unchanged.
+          getLog().debug({ agent: id }, 'agents.not_in_registry');
+          continue;
+        }
+        // Any other error must surface.
+        throw err;
       }
     }
   }

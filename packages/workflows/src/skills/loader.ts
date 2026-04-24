@@ -29,6 +29,21 @@ function getLog(): ReturnType<typeof createLogger> {
  */
 export type BundledSkills = Record<string, string>;
 
+/**
+ * Thrown by `loadSkill` when the named skill is absent from every source
+ * (project / global / bundled). Callers that have a legitimate
+ * "skip if not found" semantic (e.g. the DAG resolver falling back to raw
+ * pass-through) should catch this narrow type and let any other error bubble
+ * — load errors like malformed frontmatter or permission denials must
+ * surface, not be silently swallowed.
+ */
+export class SkillNotFoundError extends Error {
+  constructor(public readonly name: string) {
+    super(`Skill '${name}' not found in any source (project, global, bundled).`);
+    this.name = 'SkillNotFoundError';
+  }
+}
+
 export interface SkillLoaderSources {
   /** Bundled SKILL.md contents keyed by skill name. */
   bundled?: BundledSkills;
@@ -57,7 +72,7 @@ export async function loadSkill(name: string, sources: SkillLoaderSources): Prom
     return parseSkillContent(name, sources.bundled[name], 'bundled', undefined);
   }
 
-  throw new Error(`Skill '${name}' not found in any source (project, global, bundled).`);
+  throw new SkillNotFoundError(name);
 }
 
 /**
