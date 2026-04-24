@@ -50,6 +50,47 @@ export interface PydanticProviderDefaults {
   agents?: Record<string, { entry: string; deps?: string[] }>;
 }
 
+/**
+ * LiteLLM provider defaults. LiteLLM runs as an external OpenAI-compatible
+ * proxy (https://docs.litellm.ai/docs/simple_proxy). Archon points the OpenAI
+ * SDK at it and routes canonical `provider/model` names to the configured
+ * upstream list (Anthropic, OpenAI, Azure AI Foundry, Novita, ...).
+ */
+export interface LiteLLMProviderDefaults {
+  [key: string]: unknown;
+  /** Default model string when a node/workflow does not specify one. Should
+   *  follow LiteLLM canonical form — e.g. `openai/gpt-4o`, `anthropic/claude-
+   *  sonnet-4-5`, `azure_ai/claude-sonnet-4-5`, `novita/meta-llama/...`. */
+  model?: string;
+  /** Absolute path to the `litellm` binary (used when Archon spawns its own
+   *  proxy). Optional in dev mode (PATH lookup handles common install paths). */
+  litellmBinaryPath?: string;
+  /** Escape hatch: point at an externally-managed LiteLLM proxy. When set,
+   *  Archon does NOT spawn a subprocess and uses this URL as the OpenAI SDK
+   *  base URL. Should include the `/v1` suffix only if your proxy requires it
+   *  (the OpenAI SDK appends `/chat/completions` etc. automatically). */
+  baseUrl?: string;
+  /** Absolute path to the proxy's `litellm_config.yaml` (the `model_list`
+   *  declaration). Default: `~/.archon/litellm_config.yaml`. */
+  configPath?: string;
+  /** TCP port for the spawned proxy. Default: 4000. */
+  port?: number;
+  /** Env var NAME that holds the master key used to authenticate against the
+   *  proxy. Default: `LITELLM_MASTER_KEY`. Values are never stored in YAML —
+   *  only the variable name is. */
+  masterKeyEnv?: string;
+  /** Per-upstream-provider credential mapping. Values are env var NAMES that
+   *  hold each upstream's API key / base URL. Archon ensures they're present
+   *  in the proxy's environment before spawning. */
+  providers?: Record<
+    string,
+    {
+      authTokenEnv?: string;
+      apiBaseEnv?: string;
+    }
+  >;
+}
+
 /** Generic per-provider defaults bag used by config surfaces and UI. */
 export type ProviderDefaults = Record<string, unknown>;
 

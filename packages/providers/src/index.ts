@@ -40,7 +40,11 @@ export { PydanticProvider } from './pydantic/provider';
 export { parseClaudeConfig, type ClaudeProviderDefaults } from './claude/config';
 export { parseOpenCodeConfig, parseOpenCodeModel, resolveOpencodeAuthEnv } from './opencode/config';
 export { parsePydanticConfig, resolveAgentEntry } from './pydantic/config';
-export type { OpenCodeProviderDefaults, PydanticProviderDefaults } from './types';
+export type {
+  OpenCodeProviderDefaults,
+  PydanticProviderDefaults,
+  LiteLLMProviderDefaults,
+} from './types';
 
 // Utilities (needed by consumers)
 export { resolveClaudeBinaryPath, fileExists as claudeFileExists } from './claude/binary-resolver';

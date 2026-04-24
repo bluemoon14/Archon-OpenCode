@@ -97,6 +97,15 @@ export interface WorkflowConfig {
       agentsDir?: string;
       agents?: Record<string, { entry: string; deps?: string[] }>;
     };
+    litellm: {
+      model?: string;
+      litellmBinaryPath?: string;
+      baseUrl?: string;
+      configPath?: string;
+      port?: number;
+      masterKeyEnv?: string;
+      providers?: Record<string, { authTokenEnv?: string; apiBaseEnv?: string }>;
+    };
   };
 }
 

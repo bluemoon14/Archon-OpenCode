@@ -17,6 +17,7 @@ import type {
   ClaudeProviderDefaults,
   OpenCodeProviderDefaults,
   PydanticProviderDefaults,
+  LiteLLMProviderDefaults,
   ProviderDefaultsMap,
 } from '@archon/providers/types';
 
@@ -24,6 +25,7 @@ export type {
   ClaudeProviderDefaults,
   OpenCodeProviderDefaults,
   PydanticProviderDefaults,
+  LiteLLMProviderDefaults,
   ProviderDefaultsMap,
 };
 
@@ -35,6 +37,7 @@ export type AssistantDefaultsConfig = ProviderDefaultsMap & {
   claude?: ClaudeProviderDefaults;
   opencode?: OpenCodeProviderDefaults;
   pydantic?: PydanticProviderDefaults;
+  litellm?: LiteLLMProviderDefaults;
 };
 
 /**
@@ -48,6 +51,7 @@ export type AssistantDefaults = ProviderDefaultsMap & {
   claude: ClaudeProviderDefaults;
   opencode: OpenCodeProviderDefaults;
   pydantic: PydanticProviderDefaults;
+  litellm: LiteLLMProviderDefaults;
 };
 
 export interface GlobalConfig {

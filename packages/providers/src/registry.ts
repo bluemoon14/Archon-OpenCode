@@ -20,6 +20,9 @@ import { OpenCodeProvider } from './opencode/provider';
 import { OPENCODE_CAPABILITIES } from './opencode/capabilities';
 import { PydanticProvider } from './pydantic/provider';
 import { PYDANTIC_CAPABILITIES } from './pydantic/capabilities';
+import { LiteLLMProvider } from './litellm/provider';
+import { LITELLM_CAPABILITIES } from './litellm/capabilities';
+import { isLiteLLMModel } from './litellm/config';
 import { UnknownProviderError } from './errors';
 import { createLogger } from '@archon/paths';
 
@@ -121,6 +124,23 @@ export function registerBuiltinProviders(): void {
       builtIn: true,
     },
     {
+      id: 'litellm',
+      displayName: 'LiteLLM (proxy)',
+      factory: () => new LiteLLMProvider(),
+      capabilities: LITELLM_CAPABILITIES,
+      // Claim the canonical LiteLLM upstream prefixes: anthropic/, openai/,
+      // azure/, azure_ai/, novita/. See ./litellm/config.ts for the full list.
+      //
+      // `anthropic/*` routing: both Claude and LiteLLM accept these prefixes.
+      // inferProviderFromModel() returns the FIRST built-in match and Claude
+      // is registered first — so Claude SDK wins by default (which matches the
+      // "prefer Claude SDK when the binary is installed" guidance). Users who
+      // want to force LiteLLM routing set `provider: litellm` on the workflow
+      // node, overriding the inference.
+      isModelCompatible: (model: string): boolean => isLiteLLMModel(model),
+      builtIn: true,
+    },
+    {
       id: 'opencode',
       displayName: 'OpenCode',
       factory: () => new OpenCodeProvider(),
@@ -128,12 +148,15 @@ export function registerBuiltinProviders(): void {
       isModelCompatible: (model: string): boolean => {
         // Explicit opencode/ prefix is the inference hint. Anthropic-native
         // aliases (sonnet/opus/haiku) and bare claude-* stay reserved so the
-        // Claude provider wins by default. Otherwise we accept any
-        // `providerID/modelID` shape (OpenCode fronts many upstreams).
+        // Claude provider wins by default. LiteLLM's prefixes (anthropic/,
+        // openai/, azure/, azure_ai/, novita/) are also reserved so LiteLLM
+        // claims them. Otherwise we accept any `providerID/modelID` shape
+        // (OpenCode fronts many upstreams).
         if (!model) return false;
         if (model.startsWith('opencode/')) return true;
         if (['sonnet', 'opus', 'haiku'].includes(model)) return false;
         if (model.startsWith('claude-') || model === 'inherit') return false;
+        if (isLiteLLMModel(model)) return false;
         return /^[a-z][a-z0-9_-]*\/.+/i.test(model);
       },
       builtIn: true,

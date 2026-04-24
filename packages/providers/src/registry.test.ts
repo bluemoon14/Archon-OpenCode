@@ -165,23 +165,24 @@ describe('registry', () => {
   describe('getRegisteredProviders', () => {
     test('returns all registered providers', () => {
       const all = getRegisteredProviders();
-      expect(all.length).toBe(3);
+      expect(all.length).toBe(4);
       expect(all.map(r => r.id)).toContain('claude');
       expect(all.map(r => r.id)).toContain('opencode');
       expect(all.map(r => r.id)).toContain('pydantic');
+      expect(all.map(r => r.id)).toContain('litellm');
     });
 
     test('includes additional providers after registration', () => {
       registerProvider(makeMockRegistration('my-llm'));
       const all = getRegisteredProviders();
-      expect(all.length).toBe(4);
+      expect(all.length).toBe(5);
     });
   });
 
   describe('getProviderInfoList', () => {
     test('returns API-safe projection without factory', () => {
       const infos = getProviderInfoList();
-      expect(infos.length).toBe(3);
+      expect(infos.length).toBe(4);
       for (const info of infos) {
         expect(info).toHaveProperty('id');
         expect(info).toHaveProperty('displayName');
@@ -209,7 +210,7 @@ describe('registry', () => {
       registerBuiltinProviders();
       registerBuiltinProviders();
       const all = getRegisteredProviders();
-      expect(all.length).toBe(3);
+      expect(all.length).toBe(4);
     });
   });
 
@@ -230,6 +231,38 @@ describe('registry', () => {
       expect(reg.isModelCompatible('inherit')).toBe(true);
       expect(reg.isModelCompatible('claude-3.5-sonnet')).toBe(true);
       expect(reg.isModelCompatible('gpt-4')).toBe(false);
+    });
+
+    test('LiteLLM registration matches canonical upstream prefixes', () => {
+      const reg = getRegistration('litellm');
+      expect(reg.isModelCompatible('anthropic/claude-sonnet-4-5')).toBe(true);
+      expect(reg.isModelCompatible('openai/gpt-4o')).toBe(true);
+      expect(reg.isModelCompatible('azure/my-deployment')).toBe(true);
+      expect(reg.isModelCompatible('azure_ai/claude-sonnet-4-5')).toBe(true);
+      expect(reg.isModelCompatible('novita/meta-llama/llama-3.1')).toBe(true);
+      expect(reg.isModelCompatible('sonnet')).toBe(false);
+      expect(reg.isModelCompatible('opencode/gpt-4o')).toBe(false);
+      expect(reg.isModelCompatible('google/gemini-1.5')).toBe(false);
+    });
+
+    test('OpenCode does NOT claim LiteLLM prefixes anymore', () => {
+      // Regression guard: before Increment 3, OpenCode matched any
+      // `<provider>/<model>` shape and would have stolen anthropic/, openai/,
+      // azure_ai/, novita/ routing from LiteLLM.
+      const reg = getRegistration('opencode');
+      expect(reg.isModelCompatible('anthropic/claude-sonnet-4-5')).toBe(false);
+      expect(reg.isModelCompatible('openai/gpt-4o')).toBe(false);
+      expect(reg.isModelCompatible('azure/whatever')).toBe(false);
+      expect(reg.isModelCompatible('azure_ai/claude')).toBe(false);
+      expect(reg.isModelCompatible('novita/anything')).toBe(false);
+      // Still accepts its own prefix and other non-LiteLLM routes.
+      expect(reg.isModelCompatible('opencode/gpt-4o')).toBe(true);
+      expect(reg.isModelCompatible('google/gemini-1.5')).toBe(true);
+    });
+
+    test('registering built-ins includes litellm', () => {
+      const all = getRegisteredProviders();
+      expect(all.map(r => r.id)).toContain('litellm');
     });
   });
 });
