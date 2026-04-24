@@ -61,6 +61,7 @@ describe('expandAlias', () => {
     expect(expandAlias('anthropic/claude-opus-4-5', { fast: 'x' })).toEqual({
       model: 'anthropic/claude-opus-4-5',
       expanded: false,
+      chain: ['anthropic/claude-opus-4-5'],
     });
   });
 
@@ -68,15 +69,33 @@ describe('expandAlias', () => {
     expect(expandAlias('fast', { fast: 'anthropic/claude-haiku-4-5' })).toEqual({
       model: 'anthropic/claude-haiku-4-5',
       expanded: true,
+      chain: ['fast', 'anthropic/claude-haiku-4-5'],
     });
   });
 
-  test('does not chain — returns first hop only', () => {
-    // alias pointing at another alias — we deliberately don't follow
-    expect(expandAlias('outer', { outer: 'inner', inner: 'target' })).toEqual({
-      model: 'inner',
+  test('follows multi-hop chains', () => {
+    expect(expandAlias('outer', { outer: 'inner', inner: 'anthropic/claude-haiku-4-5' })).toEqual({
+      model: 'anthropic/claude-haiku-4-5',
       expanded: true,
+      chain: ['outer', 'inner', 'anthropic/claude-haiku-4-5'],
     });
+  });
+
+  test('throws on alias cycle', () => {
+    expect(() => expandAlias('a', { a: 'b', b: 'a' })).toThrow(/cycle detected/);
+  });
+
+  test('throws on self-referential cycle', () => {
+    expect(() => expandAlias('self', { self: 'self' })).toThrow(/cycle detected/);
+  });
+
+  test('throws when chain exceeds depth cap', () => {
+    // Build a chain a -> b -> c -> ... 10 deep; cap is 8.
+    const aliases: Record<string, string> = {};
+    for (let i = 0; i < 10; i++) {
+      aliases[`step${i}`] = `step${i + 1}`;
+    }
+    expect(() => expandAlias('step0', aliases)).toThrow(/exceeded depth cap/);
   });
 });
 
